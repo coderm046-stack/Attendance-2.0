@@ -1,0 +1,2175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="description" content="Student Attendance Tracker PWA">
+    <title>Attendance Tracker</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icon.png" type="image/png">
+    
+    <!-- Tailwind CSS (CDN is fine for single-file PWA — console warning is cosmetic only) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Dexie.js for IndexedDB -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dexie/3.2.4/dexie.min.js"></script>
+    
+    <!-- SheetJS for Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- jsPDF and AutoTable for PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    
+    <script>
+        const GOOGLE_SCRIPT_URL = ''; // Cloud sync disabled
+    </script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&family=Poppins:wght@300;400;500;600;700;800&display=swap');
+        
+        :root {
+            --bg-primary: #0f0f1e;
+            --bg-secondary: #1a1a2e;
+            --bg-tertiary: #252540;
+            --accent-blue: #3b82f6;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-yellow: #f59e0b;
+            --text-primary: #ffffff;
+            --text-secondary: #9ca3af;
+            --border-male: #60a5fa;
+            --border-female: #f472b6;
+        }
+        
+        [data-theme="light"] {
+            --bg-primary: #f8fafc;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f1f5f9;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            transition: background 0.3s ease, color 0.3s ease;
+            padding-bottom: 80px;
+        }
+        
+        /* DAILY TAB SPECIFIC STYLES */
+        .daily-view {
+            font-family: 'Poppins', sans-serif;
+        }
+        
+        .daily-top-header {
+            background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+            color: white;
+            padding: 16px 20px;
+            position: relative;
+        }
+        
+        .daily-app-title {
+            font-size: 32px;
+            font-weight: 800;
+            font-style: italic;
+            letter-spacing: 2px;
+        }
+        
+        .daily-app-subtitle {
+            font-size: 11px;
+            opacity: 0.9;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .daily-theme-toggle {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .daily-date-section {
+            padding: 16px 20px 0;
+            background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+        }
+        
+        .daily-date-input {
+            width: 100%;
+            padding: 14px 18px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            text-align: center;
+            font-family: 'Poppins', sans-serif;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+        
+        .daily-stats-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+            padding: 16px 20px;
+            background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+        }
+        
+        .daily-stat-box {
+            padding: 14px;
+            border-radius: 16px;
+            font-weight: 700;
+            font-size: 13px;
+            letter-spacing: 0.3px;
+            line-height: 1.6;
+        }
+        
+        .daily-stat-box.present {
+            background: rgba(33, 150, 243, 0.8);
+            color: white;
+        }
+        
+        .daily-stat-box.absent {
+            background: rgba(156, 39, 176, 0.8);
+            color: white;
+        }
+        
+        .daily-mark-all-section {
+            padding: 0 20px 16px;
+            background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+        }
+        
+        .daily-mark-btn {
+            padding: 14px;
+            background: white;
+            border: none;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            font-family: 'Poppins', sans-serif;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .daily-mark-btn.present {
+            color: #9C27B0;
+        }
+        
+        .daily-mark-btn.absent {
+            color: #9C27B0;
+        }
+        
+        .daily-student-list {
+            padding: 16px 20px;
+            background: var(--bg-primary);
+        }
+        
+        .daily-student-card {
+            background: var(--bg-secondary);
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            border-left: 6px solid #ec407a;
+        }
+        
+        .daily-student-card.male {
+            border-left-color: #2196F3;
+        }
+        
+        .daily-student-card.female {
+            border-left-color: #ec407a;
+        }
+        
+        .daily-student-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        
+        .daily-student-info h3 {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+        
+        .daily-student-info p {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        
+        .daily-attendance-btns {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .daily-attendance-btns button {
+            width: 56px;
+            height: 56px;
+            border-radius: 12px;
+            border: 2px solid var(--bg-tertiary);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            font-size: 20px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: 'Poppins', sans-serif;
+        }
+        
+        .daily-attendance-btns button.active.present-btn {
+            background: #4CAF50;
+            color: white;
+            border-color: #4CAF50;
+            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
+        }
+        
+        .daily-attendance-btns button.active.absent-btn {
+            background: #f44336;
+            color: white;
+            border-color: #f44336;
+            box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4);
+        }
+        
+        .remark-box {
+            margin-top: 12px;
+        }
+        
+        .remark-box input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid var(--bg-tertiary);
+            border-radius: 8px;
+            font-size: 13px;
+            font-family: 'Poppins', sans-serif;
+            font-weight: 500;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+        
+        .remark-box input:focus {
+            outline: none;
+            border-color: #2196F3;
+        }
+        
+        .remark-box input::placeholder {
+            color: var(--text-secondary);
+            font-weight: 400;
+        }
+        
+        /* ORIGINAL DESIGN FOR OTHER TABS */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+            padding: 24px;
+            border-radius: 16px;
+            margin-bottom: 24px;
+            box-shadow: 0 10px 40px rgba(139, 92, 246, 0.3);
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            font-weight: 800;
+            margin-bottom: 8px;
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 16px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+        }
+        
+        .btn-primary { background: linear-gradient(135deg, var(--accent-green), #059669); color: white; }
+        .btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); }
+        .btn-danger { background: linear-gradient(135deg, var(--accent-red), #dc2626); color: white; }
+        .btn-install { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: white; }
+        
+        .attendance-table-container {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px;
+            overflow-x: auto;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        .attendance-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 13px;
+        }
+        
+        .attendance-table th {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-weight: 700;
+            padding: 12px 8px;
+            text-align: center;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            border-bottom: 2px solid var(--accent-blue);
+        }
+        
+        .attendance-table th:first-child,
+        .attendance-table td:first-child {
+            position: sticky;
+            left: 0;
+            background: var(--bg-secondary);
+            z-index: 5;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+        }
+        
+        .attendance-table th:first-child {
+            z-index: 15;
+            background: var(--bg-tertiary);
+        }
+        
+        .attendance-table td {
+            padding: 10px 8px;
+            text-align: center;
+            border-bottom: 1px solid var(--bg-tertiary);
+        }
+        
+        .attendance-table tr:hover td {
+            background: var(--bg-tertiary);
+        }
+        
+        .student-name-cell {
+            text-align: left;
+            font-weight: 600;
+            min-width: 200px;
+        }
+        
+        .student-name-cell.male {
+            border-left: 4px solid var(--border-male);
+        }
+        
+        .student-name-cell.female {
+            border-left: 4px solid var(--border-female);
+        }
+        
+        .day-cell {
+            cursor: pointer;
+            min-width: 40px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        .day-cell.present {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent-green);
+            font-weight: 700;
+        }
+        
+        .day-cell.absent {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--accent-red);
+            font-weight: 700;
+        }
+        
+        .day-cell:hover {
+            background: var(--bg-tertiary);
+            transform: scale(1.1);
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .summary-card {
+            background: var(--bg-secondary);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        .summary-card.gradient-green {
+            background: linear-gradient(135deg, var(--accent-green), #059669);
+            color: white;
+        }
+        
+        .summary-card.gradient-red {
+            background: linear-gradient(135deg, var(--accent-red), #dc2626);
+            color: white;
+        }
+        
+        .summary-card.gradient-blue {
+            background: linear-gradient(135deg, var(--accent-blue), #2563eb);
+            color: white;
+        }
+        
+        .summary-card.gradient-pink {
+            background: linear-gradient(135deg, var(--border-female), #ec4899);
+            color: white;
+        }
+        
+        .summary-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            opacity: 0.9;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        
+        .summary-value {
+            font-size: 36px;
+            font-weight: 800;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        .percentage-card {
+            background: var(--bg-secondary);
+            padding: 20px;
+            border-radius: 12px;
+            border-top: 4px solid transparent;
+        }
+        
+        .percentage-card.male {
+            border-top-color: var(--border-male);
+        }
+        
+        .percentage-card.female {
+            border-top-color: var(--border-female);
+        }
+        
+        .percentage-value {
+            font-size: 48px;
+            font-weight: 800;
+            font-family: 'JetBrains Mono', monospace;
+            background: linear-gradient(135deg, var(--accent-green), #059669);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--bg-tertiary);
+            display: flex;
+            justify-content: space-around;
+            padding: 12px 0;
+            z-index: 100;
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.2);
+        }
+        
+        .nav-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            transition: all 0.3s ease;
+            padding: 8px;
+            border-radius: 8px;
+        }
+        
+        .nav-item:hover {
+            background: var(--bg-tertiary);
+        }
+        
+        .nav-item.active {
+            color: var(--accent-blue);
+        }
+        
+        .nav-item i {
+            font-size: 24px;
+        }
+        
+        .nav-item span {
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.4s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .theme-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: var(--bg-secondary);
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            z-index: 101;
+        }
+        
+        .theme-toggle:hover {
+            transform: rotate(180deg) scale(1.1);
+        }
+        
+        .upload-zone {
+            background: var(--bg-secondary);
+            border: 2px dashed var(--accent-blue);
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+        }
+        
+        .upload-zone:hover {
+            background: var(--bg-tertiary);
+            border-color: #8b5cf6;
+        }
+        
+        .upload-zone i {
+            font-size: 48px;
+            color: var(--accent-blue);
+            margin-bottom: 16px;
+        }
+        
+        input[type="file"] {
+            display: none;
+        }
+        
+        .form-group {
+            margin-bottom: 16px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+        }
+        
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid var(--bg-tertiary);
+            border-radius: 8px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            font-size: 16px;
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+        
+        .month-selector {
+            background: var(--bg-secondary);
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 12px;
+            align-items: end;
+        }
+        
+        .month-selector > div {
+            flex: 1;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+        
+        .empty-state i {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+        
+        @media (max-width: 768px) {
+            .attendance-table {
+                font-size: 11px;
+            }
+            
+            .attendance-table th,
+            .attendance-table td {
+                padding: 8px 4px;
+            }
+            
+            .summary-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .month-selector {
+                flex-direction: column;
+                align-items: stretch;
+            }
+        }
+        /* SUMMARY TAB STYLES */
+        .summary-tab-header {
+            background: linear-gradient(135deg, #10b981, #059669);
+            padding: 24px;
+            border-radius: 16px;
+            margin-bottom: 24px;
+            box-shadow: 0 10px 40px rgba(16, 185, 129, 0.3);
+        }
+
+        .setup-tab-header {
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            padding: 24px;
+            border-radius: 16px;
+            margin-bottom: 24px;
+            box-shadow: 0 10px 40px rgba(249, 115, 22, 0.3);
+        }
+
+        .yearly-summary-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 14px;
+        }
+
+        .yearly-summary-table th {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-weight: 700;
+            padding: 14px 16px;
+            text-align: center;
+            border-bottom: 2px solid #10b981;
+        }
+
+        .yearly-summary-table td {
+            padding: 14px 16px;
+            text-align: center;
+            border-bottom: 1px solid var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .yearly-summary-table tr:hover td {
+            background: var(--bg-tertiary);
+        }
+
+        .yearly-summary-table .month-name {
+            text-align: left;
+            font-weight: 600;
+        }
+
+        .yearly-summary-table .total-row td {
+            background: linear-gradient(135deg, rgba(16,185,129,0.15), rgba(5,150,105,0.15));
+            font-weight: 800;
+            font-size: 15px;
+            color: #10b981;
+            border-top: 2px solid #10b981;
+        }
+
+        .wd-badge {
+            display: inline-block;
+            background: rgba(16,185,129,0.15);
+            color: #10b981;
+            border-radius: 20px;
+            padding: 4px 14px;
+            font-weight: 700;
+            font-size: 15px;
+        }
+
+        .running-total-badge {
+            display: inline-block;
+            background: rgba(59,130,246,0.15);
+            color: var(--accent-blue);
+            border-radius: 20px;
+            padding: 4px 14px;
+            font-weight: 700;
+            font-size: 15px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Theme Toggle (For Monthly/Setup tabs) -->
+    <button class="theme-toggle" id="main-theme-toggle" onclick="toggleTheme()" style="display: none;">
+        <i class="fas fa-moon" id="theme-icon"></i>
+    </button>
+
+    <!-- Daily Attendance Tab -->
+    <div id="tab-daily" class="tab-content active daily-view">
+        <div class="daily-top-header">
+            <div class="daily-app-title">SAT V1.0</div>
+            <div class="daily-app-subtitle">Student App</div>
+            <button class="daily-theme-toggle" onclick="toggleTheme()">
+                <i class="fas fa-moon" id="daily-theme-icon"></i>
+            </button>
+        </div>
+
+        <div class="daily-date-section">
+            <input type="date" id="daily-date" class="daily-date-input" onchange="loadDailyAttendance()">
+        </div>
+
+        <div class="daily-stats-section">
+            <div class="daily-stat-box present">
+                BOYS P: <span id="boys-present">0</span><br>
+                GIRLS P: <span id="girls-present">0</span><br>
+                COMBINE P: <span id="combine-present">0</span>
+            </div>
+            <div class="daily-stat-box absent">
+                BOYS A: <span id="boys-absent">0</span><br>
+                GIRLS A: <span id="girls-absent">0</span><br>
+                COMBINE A: <span id="combine-absent">0</span>
+            </div>
+        </div>
+
+        <div class="daily-mark-all-section">
+            <button class="daily-mark-btn present" onclick="markAllToday('present')">
+                MARK ALL PRESENT
+            </button>
+            <button class="daily-mark-btn absent" onclick="markAllToday('absent')">
+                MARK ALL ABSENT
+            </button>
+            <button class="daily-mark-btn" style="color: #e53935; font-size: 12px;" onclick="clearAllToday()">
+                &#x1F5D1; CLEAR ALL
+            </button>
+        </div>
+
+        <div class="daily-student-list" id="student-list">
+            <!-- Students will be loaded here -->
+        </div>
+    </div>
+
+    <!-- Monthly Attendance Tab - ORIGINAL DESIGN -->
+    <div id="tab-monthly" class="tab-content">
+        <div class="container">
+            <div class="header">
+                <h1><i class="fas fa-graduation-cap"></i> Student Attendance Tracker</h1>
+                <p style="opacity: 0.9; font-size: 14px; margin-top: 4px;">Track and manage student attendance efficiently</p>
+                <div class="btn-group">
+                    <button class="btn btn-install" id="install-btn" style="display: none;">
+                        <i class="fas fa-download"></i> Install App
+                    </button>
+                    <button class="btn btn-primary" onclick="exportExcel()">
+                        <i class="fas fa-file-excel"></i> Export Excel
+                    </button>
+                    <button class="btn btn-primary" onclick="exportPDF()">
+                        <i class="fas fa-file-pdf"></i> Export PDF
+                    </button>
+                </div>
+            </div>
+
+            <div class="month-selector">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label>Select Month</label>
+                    <input type="month" id="attendance-month" onchange="loadMonthlyAttendance()">
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label style="color: #10b981;">&#x2714; Previous Month Auto</label>
+                    <div style="padding: 10px 12px; background: rgba(16,185,129,0.1); border: 2px solid #10b981; border-radius: 8px; font-size: 13px; color: #10b981; font-weight: 600;">
+                        Auto-calculated per student &#x1F501;
+                    </div>
+                    <input type="hidden" id="prev-month-present" value="0">
+                </div>
+            </div>
+
+            <!-- ══ HOLIDAY MANAGER ══ -->
+            <div style="background: var(--bg-secondary); border-radius: 16px; padding: 20px; margin-bottom: 20px; border: 2px solid rgba(59,130,246,0.3); box-shadow: 0 4px 16px rgba(0,0,0,0.15);">
+                <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 4px; display:flex; align-items:center; gap:10px;">
+                    <span style="font-size:24px;">📅</span> Holiday Manager
+                    <span style="font-size:12px; font-weight:500; color:var(--text-secondary); margin-left:4px;">Excluded from attendance % calculation</span>
+                </h3>
+                <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-top:14px;">
+                    <div style="flex:1; min-width:140px;">
+                        <label style="font-size:12px; color:var(--text-secondary); font-weight:600; display:block; margin-bottom:6px;">Holiday Date:</label>
+                        <select id="holiday-date-select" style="width:100%; padding:10px 14px; border-radius:10px; border:2px solid rgba(59,130,246,0.4); background:var(--bg-tertiary); color:var(--text-primary); font-size:14px; font-weight:600; cursor:pointer;">
+                            <option value="">-- pick a day --</option>
+                        </select>
+                    </div>
+                    <div style="flex:2; min-width:180px;">
+                        <label style="font-size:12px; color:var(--text-secondary); font-weight:600; display:block; margin-bottom:6px;">&nbsp;</label>
+                        <input type="text" id="holiday-name-input" placeholder="Holiday name  e.g. Diwali"
+                               style="width:100%; padding:10px 14px; border-radius:10px; border:2px solid rgba(255,255,255,0.1); background:var(--bg-tertiary); color:var(--text-primary); font-size:14px;"
+                               onkeydown="if(event.key==='Enter') addHoliday()">
+                    </div>
+                    <button onclick="addHoliday()" style="padding:10px 20px; background:linear-gradient(135deg,#f97316,#ea580c); color:white; border:none; border-radius:10px; font-weight:700; font-size:14px; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:6px; align-self:flex-end;">
+                        ➕ Add Holiday
+                    </button>
+                </div>
+
+                <div style="margin-top:14px; display:flex; align-items:center; gap:10px;">
+                    <input type="checkbox" id="auto-sundays" checked onchange="calculateSummary()"
+                           style="width:18px; height:18px; accent-color:#3b82f6; cursor:pointer;">
+                    <label for="auto-sundays" style="font-size:14px; font-weight:600; cursor:pointer;">Auto-exclude Sundays</label>
+                    <span id="sunday-count-badge" style="font-size:11px; background:rgba(59,130,246,0.2); color:#93c5fd; padding:2px 8px; border-radius:20px; font-weight:700;"></span>
+                </div>
+
+                <div id="holiday-chips" style="margin-top:12px; display:flex; flex-wrap:wrap; gap:8px; min-height:28px;"></div>
+
+                <div style="margin-top:12px; padding:10px 14px; background:rgba(245,158,11,0.08); border-radius:10px; font-size:13px; color:var(--text-secondary);">
+                    💡 Sundays auto-excluded. Add school-specific holidays (Diwali, Independence Day, etc.) above.
+                </div>
+
+                <div style="margin-top:10px; display:flex; gap:16px; flex-wrap:wrap;">
+                    <div style="padding:10px 16px; background:rgba(59,130,246,0.1); border-radius:10px; font-size:13px; font-weight:700;">
+                        📅 Working Days: <span id="working-days-display" style="color:#60a5fa;">—</span>
+                    </div>
+                    <div style="padding:10px 16px; background:rgba(239,68,68,0.1); border-radius:10px; font-size:13px; font-weight:700;">
+                        🚫 Total Holidays: <span id="total-holidays-display" style="color:#f87171;">—</span>
+                        <span style="font-size:11px; font-weight:400; color:var(--text-secondary);"> (manual + Sundays)</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="attendance-table-container">
+                <table class="attendance-table" id="attendance-table">
+                    <thead>
+                        <tr id="table-header">
+                            <th>Roll No<br>Student Name<br>Gender</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                    </tbody>
+                </table>
+            </div>
+
+            <h2 style="font-size: 24px; font-weight: 700; margin-bottom: 16px;">
+                <i class="fas fa-chart-pie"></i> Monthly Summary
+            </h2>
+            
+            <div class="summary-grid">
+                <div class="summary-card gradient-blue">
+                    <div class="summary-title">Total Present Boys</div>
+                    <div class="summary-value" id="total-present-boys">0</div>
+                </div>
+                <div class="summary-card gradient-red">
+                    <div class="summary-title">Total Absent Boys</div>
+                    <div class="summary-value" id="total-absent-boys">0</div>
+                </div>
+                <div class="summary-card gradient-pink">
+                    <div class="summary-title">Total Present Girls</div>
+                    <div class="summary-value" id="total-present-girls">0</div>
+                </div>
+                <div class="summary-card gradient-red">
+                    <div class="summary-title">Total Absent Girls</div>
+                    <div class="summary-value" id="total-absent-girls">0</div>
+                </div>
+                <div class="summary-card gradient-green">
+                    <div class="summary-title">Combine Present</div>
+                    <div class="summary-value" id="combine-present-monthly">0</div>
+                </div>
+                <div class="summary-card gradient-red">
+                    <div class="summary-title">Combine Absent</div>
+                    <div class="summary-value" id="combine-absent-monthly">0</div>
+                </div>
+            </div>
+
+            <div class="summary-grid">
+                <div class="percentage-card male">
+                    <div class="summary-title">Present % of Boys</div>
+                    <div class="percentage-value" id="boys-percentage">0%</div>
+                    <p style="color: var(--text-secondary); font-size: 12px; margin-top: 8px;">
+                        (Subtract Holidays)
+                    </p>
+                </div>
+                <div class="percentage-card female">
+                    <div class="summary-title">Present % of Girls</div>
+                    <div class="percentage-value" id="girls-percentage">0%</div>
+                    <p style="color: var(--text-secondary); font-size: 12px; margin-top: 8px;">
+                        (Subtract Holidays)
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Setup Tab - ORIGINAL DESIGN -->
+    <div id="tab-setup" class="tab-content">
+        <div class="container">
+            <div class="setup-tab-header">
+                <h1 style="font-size:24px; font-weight:800; color:white;"><i class="fas fa-cog"></i> Setup & Students</h1>
+                <p style="opacity:0.9; font-size:14px; margin-top:4px; color:white;">Manage student data and app configuration</p>
+            </div>
+            <div class="upload-zone" onclick="document.getElementById('excel-upload').click()">
+                <i class="fas fa-cloud-upload-alt"></i>
+                <h3 style="font-size: 20px; margin-bottom: 8px;">Upload Excel File</h3>
+                <p style="color: var(--text-secondary);">Click to select an Excel file with student data</p>
+                <p style="color: var(--text-secondary); font-size: 12px; margin-top: 8px;">
+                    Required columns: Roll No, Student Name, Gender
+                </p>
+            </div>
+            <input type="file" id="excel-upload" accept=".xlsx,.xls,.csv" onchange="handleExcelUpload(event)">
+            
+            <button class="btn btn-danger" onclick="clearAllData()" style="width: 100%; margin-bottom: 20px;">
+                <i class="fas fa-trash-alt"></i> Clear All Data
+            </button>
+
+            <!-- ══ STUDENT MANAGER ══ -->
+            <div style="background: var(--bg-secondary); border-radius: 16px; padding: 20px; margin-bottom: 20px; border: 2px solid rgba(16,185,129,0.3);">
+                <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 16px; display:flex; align-items:center; gap:10px;">
+                    <i class="fas fa-user-plus" style="color:#10b981;"></i> Add / Remove Students
+                    <span style="font-size:12px; font-weight:500; color:var(--text-secondary);">Works alongside Excel upload</span>
+                </h3>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+                    <input type="text" id="new-roll" placeholder="Roll No" style="flex:1; min-width:80px; padding:10px; border-radius:10px; border:2px solid rgba(255,255,255,0.1); background:var(--bg-tertiary); color:var(--text-primary); font-size:14px;">
+                    <input type="text" id="new-name" placeholder="Student Name" style="flex:3; min-width:140px; padding:10px; border-radius:10px; border:2px solid rgba(255,255,255,0.1); background:var(--bg-tertiary); color:var(--text-primary); font-size:14px;">
+                    <select id="new-gender" style="flex:1; min-width:90px; padding:10px; border-radius:10px; border:2px solid rgba(255,255,255,0.1); background:var(--bg-tertiary); color:var(--text-primary); font-size:14px;">
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                    </select>
+                    <button onclick="addStudentManually()" style="padding:10px 18px; background:linear-gradient(135deg,#10b981,#059669); color:white; border:none; border-radius:10px; font-weight:700; font-size:14px; cursor:pointer; white-space:nowrap;">
+                        ➕ Add
+                    </button>
+                </div>
+                <div id="student-manager-list" style="max-height:260px; overflow-y:auto; border-radius:10px; border:1px solid rgba(255,255,255,0.08);">
+                    <!-- filled by renderStudentManagerList() -->
+                </div>
+                <p style="margin-top:10px; font-size:12px; color:var(--text-secondary);">
+                    💾 Students saved to IndexedDB (persists in this browser). Upload Excel to bulk-import, or add individually above.
+                </p>
+            </div>
+            
+            <div style="background: var(--bg-secondary); padding: 20px; border-radius: 12px; margin-bottom: 16px;">
+                <h3 style="margin-bottom: 12px; font-size: 18px; font-weight: 700;">
+                    <i class="fas fa-info-circle"></i> Instructions
+                </h3>
+                <ul style="color: var(--text-secondary); font-size: 14px; line-height: 1.8; padding-left: 20px;">
+                    <li>Upload an Excel or CSV file with columns: <strong>Roll No</strong>, <strong>Student Name</strong>, <strong>Gender</strong></li>
+                    <li>Gender should be "Male" or "Female"</li>
+                    <li><strong>Daily Tab:</strong> Mark attendance with P/A buttons and add remarks</li>
+                    <li><strong>Monthly Tab:</strong> View full month table - click cells to toggle P/A</li>
+                    <li><strong>Clear All:</strong> In Daily tab, clears today's attendance marks</li>
+                    <li>Data is saved automatically to your device (IndexedDB)</li>
+                    <li>Remarks are useful for noting if a student leaves early</li>
+                </ul>
+            </div>
+            
+        </div>
+    </div>
+
+    <!-- Summary Tab - Working Days Summary -->
+    <div id="tab-summary" class="tab-content">
+        <div class="container">
+            <div class="summary-tab-header">
+                <h1 style="font-size:24px; font-weight:800; color:white;"><i class="fas fa-calendar-check"></i> Working Days Summary</h1>
+                <p style="opacity:0.9; font-size:14px; margin-top:4px; color:white;">Month-wise working days with running total</p>
+            </div>
+
+            <div style="background:var(--bg-secondary); border-radius:12px; padding:16px; margin-bottom:20px; display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+                <div style="flex:1; min-width:120px;">
+                    <label style="display:block; font-size:12px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Select Year</label>
+                    <select id="summary-year" onchange="loadYearlySummary()" style="width:100%; padding:12px; border:2px solid var(--bg-tertiary); border-radius:8px; background:var(--bg-primary); color:var(--text-primary); font-size:16px; font-family:'Inter',sans-serif;"></select>
+                </div>
+                <div style="flex:1; min-width:120px;">
+                    <label style="display:block; font-size:12px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">From Month</label>
+                    <select id="summary-from-month" onchange="loadYearlySummary()" style="width:100%; padding:12px; border:2px solid var(--bg-tertiary); border-radius:8px; background:var(--bg-primary); color:var(--text-primary); font-size:16px; font-family:'Inter',sans-serif;">
+                        <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+                        <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+                        <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+                        <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+                    </select>
+                </div>
+                <div style="flex:1; min-width:120px;">
+                    <label style="display:block; font-size:12px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">To Month</label>
+                    <select id="summary-to-month" onchange="loadYearlySummary()" style="width:100%; padding:12px; border:2px solid var(--bg-tertiary); border-radius:8px; background:var(--bg-primary); color:var(--text-primary); font-size:16px; font-family:'Inter',sans-serif;">
+                        <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+                        <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+                        <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+                        <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="background:var(--bg-secondary); border-radius:12px; padding:20px; overflow-x:auto; margin-bottom:24px; box-shadow:0 4px 12px rgba(0,0,0,0.1);">
+                <table class="yearly-summary-table" id="yearly-summary-table">
+                    <thead>
+                        <tr>
+                            <th style="text-align:left; min-width:130px;">Month</th>
+                            <th>Total Days</th>
+                            <th>Sundays</th>
+                            <th>Holidays</th>
+                            <th>Working Days</th>
+                            <th>Running Total</th>
+                        </tr>
+                    </thead>
+                    <tbody id="yearly-summary-body">
+                        <tr><td colspan="6" style="padding:40px; color:var(--text-secondary);">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:24px;" id="summary-stat-cards">
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Navigation -->
+
+    <div class="bottom-nav">
+        <div class="nav-item active" onclick="switchTab('daily')">
+            <i class="fas fa-calendar-day"></i>
+            <span>Daily</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('monthly')">
+            <i class="fas fa-table"></i>
+            <span>Monthly</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('summary')">
+            <i class="fas fa-calendar-check"></i>
+            <span>Summary</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('setup')">
+            <i class="fas fa-cog"></i>
+            <span>Setup</span>
+        </div>
+    </div>
+
+    <script>
+        // Cloud sync removed — app uses local IndexedDB only
+        const cloudEnabled = false;
+        function updateSyncBadge() {}
+        async function gsFetch() { return null; }
+        async function cloudSaveAttendance() {}
+        async function cloudDeleteAttendance() {}
+        async function cloudSaveStudents() {}
+        async function cloudClearDay() {}
+        async function syncFromCloud() {}
+
+        // Initialize Dexie Database
+        const db = new Dexie('AttendanceDB');
+        db.version(2).stores({
+            students: '++id, rollNo, name, gender',
+            attendance: '++id, date, rollNo, status, remark',
+            settings: 'key, value'
+        });
+        db.version(3).stores({
+            students: '++id, rollNo, name, gender',
+            attendance: '++id, date, rollNo, status, remark',
+            settings: 'key, value',
+            holidays: '++id, date, name'
+        });
+
+        let deferredPrompt;
+        let currentDate = new Date().toISOString().split('T')[0];
+        let currentMonth = new Date().toISOString().substring(0, 7);
+        let lastScrollPosition = 0;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async function() {
+            document.getElementById('daily-date').value = currentDate;
+            document.getElementById('attendance-month').value = currentMonth;
+            
+            // Load theme first
+            const savedTheme = localStorage.getItem('theme') || 'dark';
+            if (savedTheme === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+                document.getElementById('theme-icon').className = 'fas fa-sun';
+                document.getElementById('daily-theme-icon').className = 'fas fa-sun';
+            }
+
+            // Populate summary year dropdown
+            const yearSel = document.getElementById('summary-year');
+            const thisYear = new Date().getFullYear();
+            for (let y = thisYear - 2; y <= thisYear + 1; y++) {
+                const opt = document.createElement('option');
+                opt.value = y;
+                opt.textContent = y;
+                if (y === thisYear) opt.selected = true;
+                yearSel.appendChild(opt);
+            }
+            // Set default from/to months (June to current month for academic year feel)
+            document.getElementById('summary-from-month').value = '6';
+            const toSel = document.getElementById('summary-to-month');
+            toSel.value = String(new Date().getMonth() + 1);
+
+            loadDailyAttendance();
+        });
+
+        // PWA Install
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            document.getElementById('install-btn').style.display = 'inline-flex';
+        });
+
+        document.getElementById('install-btn').addEventListener('click', async () => {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                deferredPrompt = null;
+                document.getElementById('install-btn').style.display = 'none';
+            }
+        });
+
+        // Service Worker Registration
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(() => {
+                    const swCode = `
+                        const CACHE_NAME = 'attendance-v1';
+                        self.addEventListener('install', event => {
+                            self.skipWaiting();
+                        });
+                        self.addEventListener('fetch', event => {
+                            event.respondWith(
+                                caches.match(event.request)
+                                    .then(response => response || fetch(event.request))
+                            );
+                        });
+                    `;
+                    const blob = new Blob([swCode], { type: 'application/javascript' });
+                    const swUrl = URL.createObjectURL(blob);
+                    navigator.serviceWorker.register(swUrl);
+                });
+            });
+        }
+
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            document.getElementById('theme-icon').className = newTheme === 'light' ? 'fas fa-sun' : 'fas fa-moon';
+            document.getElementById('daily-theme-icon').className = newTheme === 'light' ? 'fas fa-sun' : 'fas fa-moon';
+            localStorage.setItem('theme', newTheme);
+        }
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+            
+            document.getElementById('tab-' + tabName).classList.add('active');
+            event.currentTarget.classList.add('active');
+
+            // Show/hide theme toggle based on tab
+            if (tabName === 'daily') {
+                document.getElementById('main-theme-toggle').style.display = 'none';
+                loadDailyAttendance();
+            } else {
+                document.getElementById('main-theme-toggle').style.display = 'flex';
+                if (tabName === 'monthly') {
+                    loadMonthlyAttendance();
+                }
+                if (tabName === 'setup') {
+                    renderStudentManagerList();
+                }
+                if (tabName === 'summary') {
+                    loadYearlySummary();
+                }
+            }
+        }
+
+        async function handleExcelUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+
+                    if (jsonData.length === 0) {
+                        alert('No data found in file!');
+                        return;
+                    }
+
+                    await db.students.clear();
+
+                    let imported = 0;
+                    for (let row of jsonData) {
+                        const rollNo = row['Roll No'] || row['RollNo'] || row['rollNo'] || row['Roll no'] || row['ROLL NO'];
+                        const name = row['Student Name'] || row['Name'] || row['name'] || row['StudentName'] || row['STUDENT NAME'];
+                        const gender = row['Gender'] || row['gender'] || row['GENDER'] || row['Sex'];
+
+                        if (rollNo && name) {
+                            await db.students.add({
+                                rollNo: String(rollNo),
+                                name: String(name),
+                                gender: String(gender || 'Male')
+                            });
+                            imported++;
+                        }
+                    }
+
+                    alert(`Successfully imported ${imported} students!\n💾 Saved to your device.`);
+                    loadDailyAttendance();
+                } catch (error) {
+                    alert('Error reading file: ' + error.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function getSortedStudents(students) {
+            return students.sort((a, b) => {
+                const numA = parseInt(a.rollNo) || 0;
+                const numB = parseInt(b.rollNo) || 0;
+                return numA - numB;
+            });
+        }
+
+        async function loadDailyAttendance() {
+            currentDate = document.getElementById('daily-date').value;
+            const students = await db.students.toArray();
+            const sortedStudents = getSortedStudents(students);
+            const listContainer = document.getElementById('student-list');
+
+            if (sortedStudents.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-users"></i>
+                        <h3 style="margin-top: 12px; color: #666;">No Students</h3>
+                        <p style="margin-top: 8px; font-size: 14px;">Upload data in Setup tab</p>
+                    </div>
+                `;
+                updateDailyStats(0, 0, 0, 0);
+                return;
+            }
+
+            listContainer.innerHTML = '';
+            let boysPresent = 0, girlsPresent = 0;
+            let boysAbsent = 0, girlsAbsent = 0;
+
+            for (let student of sortedStudents) {
+                const attendance = await db.attendance
+                    .where({ date: currentDate, rollNo: student.rollNo })
+                    .first();
+
+                const card = document.createElement('div');
+                const genderClass = student.gender.toLowerCase().startsWith('f') ? 'female' : 'male';
+                card.className = `daily-student-card ${genderClass}`;
+                card.dataset.rollno = student.rollNo;
+                card.innerHTML = `
+                    <div class="daily-student-header">
+                        <div class="daily-student-info">
+                            <h3>${student.name}</h3>
+                            <p>Roll: ${student.rollNo}</p>
+                        </div>
+                        <div class="daily-attendance-btns">
+                            <button class="present-btn ${attendance?.status === 'present' ? 'active' : ''}" 
+                                    onclick="markDailyAttendance('${student.rollNo}', 'present')">
+                                P
+                            </button>
+                            <button class="absent-btn ${attendance?.status === 'absent' ? 'active' : ''}"
+                                    onclick="markDailyAttendance('${student.rollNo}', 'absent')">
+                                A
+                            </button>
+                        </div>
+                    </div>
+                    <div class="remark-box">
+                        <input type="text" 
+                               placeholder="REMARK" 
+                               value="${attendance?.remark || ''}"
+                               onchange="saveRemark('${student.rollNo}', this.value)"
+                               onclick="event.stopPropagation()">
+                    </div>
+                `;
+                listContainer.appendChild(card);
+
+                if (attendance?.status === 'present') {
+                    if (student.gender.toLowerCase() === 'male') boysPresent++;
+                    else girlsPresent++;
+                } else if (attendance?.status === 'absent') {
+                    if (student.gender.toLowerCase() === 'male') boysAbsent++;
+                    else girlsAbsent++;
+                }
+            }
+
+            updateDailyStats(boysPresent, girlsPresent, boysAbsent, girlsAbsent);
+        }
+
+        function updateDailyStatsFromDOM() {
+            // Count stats by reading DOM state
+            let boysP = 0, girlsP = 0, boysA = 0, girlsA = 0;
+            document.querySelectorAll('.daily-student-card').forEach(card => {
+                const pActive = card.querySelector('.present-btn')?.classList.contains('active');
+                const aActive = card.querySelector('.absent-btn')?.classList.contains('active');
+                const isMale = card.classList.contains('male');
+                if (pActive) { isMale ? boysP++ : girlsP++; }
+                if (aActive) { isMale ? boysA++ : girlsA++; }
+            });
+            updateDailyStats(boysP, girlsP, boysA, girlsA);
+        }
+
+        function updateDailyStats(boysP, girlsP, boysA, girlsA) {
+            document.getElementById('boys-present').textContent = boysP;
+            document.getElementById('girls-present').textContent = girlsP;
+            document.getElementById('combine-present').textContent = boysP + girlsP;
+            document.getElementById('boys-absent').textContent = boysA;
+            document.getElementById('girls-absent').textContent = girlsA;
+            document.getElementById('combine-absent').textContent = boysA + girlsA;
+        }
+
+        async function markDailyAttendance(rollNo, status) {
+            const existing = await db.attendance.where({ date: currentDate, rollNo: rollNo }).first();
+            await db.attendance.where({ date: currentDate, rollNo: rollNo }).delete();
+            
+            const record = {
+                date: currentDate,
+                rollNo: rollNo,
+                status: status,
+                remark: existing?.remark || ''
+            };
+            await db.attendance.add(record);
+
+            
+            // Update UI in-place to avoid scroll reset
+            const card = document.querySelector(`[data-rollno="${rollNo}"]`);
+            if (card) {
+                const pBtn = card.querySelector('.present-btn');
+                const aBtn = card.querySelector('.absent-btn');
+                pBtn.classList.toggle('active', status === 'present');
+                aBtn.classList.toggle('active', status === 'absent');
+            }
+            
+            // Just update stats without re-rendering
+            updateDailyStatsFromDOM();
+        }
+
+        async function saveRemark(rollNo, remark) {
+            const existing = await db.attendance.where({ date: currentDate, rollNo: rollNo }).first();
+            let record;
+            if (existing) {
+                await db.attendance.where({ date: currentDate, rollNo: rollNo }).delete();
+                record = { date: currentDate, rollNo: rollNo, status: existing.status, remark: remark };
+                await db.attendance.add(record);
+            } else {
+                record = { date: currentDate, rollNo: rollNo, status: '', remark: remark };
+                await db.attendance.add(record);
+            }
+        }
+
+        async function markAllToday(status) {
+            const students = await db.students.toArray();
+            const records = [];
+            
+            for (let student of students) {
+                const existing = await db.attendance.where({ date: currentDate, rollNo: student.rollNo }).first();
+                await db.attendance.where({ date: currentDate, rollNo: student.rollNo }).delete();
+                const record = {
+                    date: currentDate,
+                    rollNo: student.rollNo,
+                    status: status,
+                    remark: existing?.remark || ''
+                };
+                await db.attendance.add(record);
+                records.push(record);
+                // Update DOM in-place
+                const card = document.querySelector(`[data-rollno="${student.rollNo}"]`);
+                if (card) {
+                    card.querySelector('.present-btn').classList.toggle('active', status === 'present');
+                    card.querySelector('.absent-btn').classList.toggle('active', status === 'absent');
+                }
+            }
+
+            // Update stats without re-rendering
+            updateDailyStatsFromDOM();
+        }
+
+        async function clearAllToday() {
+            if (!confirm('Clear all attendance for today (' + currentDate + ')? This cannot be undone.')) return;
+            const students = await db.students.toArray();
+            for (let student of students) {
+                await db.attendance.where({ date: currentDate, rollNo: student.rollNo }).delete();
+            }
+            // Clear from cloud too
+            loadDailyAttendance();
+        }
+
+        // Helper: count present days for a student in the previous month from actual DB data
+        async function getPrevMonthPresent(rollNo, year, month) {
+            // Go back one month
+            let prevYear = year;
+            let prevMonth = month - 1;
+            if (prevMonth === 0) { prevMonth = 12; prevYear = year - 1; }
+            const daysInPrevMonth = new Date(prevYear, prevMonth, 0).getDate();
+            let count = 0;
+            for (let day = 1; day <= daysInPrevMonth; day++) {
+                const dateStr = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const att = await db.attendance.where({ date: dateStr, rollNo: rollNo }).first();
+                if (att?.status === 'present') count++;
+            }
+            return count;
+        }
+
+        async function loadMonthlyAttendance() {
+            currentMonth = document.getElementById('attendance-month').value;
+            const [year, month] = currentMonth.split('-').map(Number);
+            const daysInMonth = new Date(year, month, 0).getDate();
+
+            // Refresh holiday manager UI for new month
+            await renderHolidayChips();
+            await populateDateDropdown();
+
+            const students = await db.students.toArray();
+            const sortedStudents = getSortedStudents(students);
+            
+            if (sortedStudents.length === 0) {
+                document.getElementById('table-body').innerHTML = `
+                    <tr>
+                        <td colspan="${daysInMonth + 5}" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                            <i class="fas fa-users" style="font-size: 48px; margin-bottom: 16px; display: block; opacity: 0.5;"></i>
+                            No students found. Please upload an Excel file in the Setup tab.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            // Build table header with holiday/Sunday highlighting
+            const holidaysList = await getHolidaysForMonth(year, month);
+            const holidayDates = new Set(holidaysList.map(h => h.date));
+            const sundayDatesSet = new Set(getSundayDates(year, month));
+            const autoExcSun = document.getElementById('auto-sundays')?.checked !== false;
+
+            let headerHTML = '<th>Roll No<br>Student Name<br>Gender</th>';
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                const isSun = sundayDatesSet.has(dateStr) && autoExcSun;
+                const isHol = holidayDates.has(dateStr);
+                let thStyle = '';
+                let dayLabel = `${day}`;
+                if (isSun) { thStyle = 'background:rgba(239,68,68,0.25); color:#f87171;'; dayLabel = `${day}<br><span style="font-size:9px;">☀️Sun</span>`; }
+                else if (isHol) { thStyle = 'background:rgba(245,158,11,0.25); color:#fbbf24;'; dayLabel = `${day}<br><span style="font-size:9px;">🏖️Hol</span>`; }
+                headerHTML += `<th style="${thStyle}">${dayLabel}</th>`;
+            }
+            headerHTML += '<th>Total<br>Present</th>';
+            headerHTML += '<th>Total<br>Absent</th>';
+            headerHTML += '<th>Previous<br>Month<br>Present</th>';
+            headerHTML += '<th>Combine<br>Present</th>';
+            document.getElementById('table-header').innerHTML = headerHTML;
+
+            // Build table body - previous month calculated per student automatically
+            let bodyHTML = '';
+
+            for (let student of sortedStudents) {
+                // Auto-calculate previous month present from actual DB data
+                const prevMonthPresent = await getPrevMonthPresent(student.rollNo, year, month);
+
+                let rowHTML = `<td class="student-name-cell ${student.gender.toLowerCase()}">
+                    <strong>${student.rollNo}</strong><br>
+                    ${student.name}<br>
+                    <span style="font-size: 11px; color: var(--text-secondary);">${student.gender}</span>
+                </td>`;
+
+                let totalPresent = 0;
+                let totalAbsent = 0;
+
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const attendance = await db.attendance
+                        .where({ date: dateStr, rollNo: student.rollNo })
+                        .first();
+
+                    const status = attendance ? attendance.status : '';
+                    const cellClass = status === 'present' ? 'present' : status === 'absent' ? 'absent' : '';
+                    const displayText = status === 'present' ? 'P' : status === 'absent' ? 'A' : '-';
+                    
+                    if (status === 'present') totalPresent++;
+                    if (status === 'absent') totalAbsent++;
+
+                    rowHTML += `<td class="day-cell ${cellClass}" onclick="toggleMonthlyAttendance('${dateStr}', '${student.rollNo}')">${displayText}</td>`;
+                }
+
+                const combinePresent = totalPresent + prevMonthPresent;
+
+                rowHTML += `<td style="font-weight: 700; color: var(--accent-green);">${totalPresent}</td>`;
+                rowHTML += `<td style="font-weight: 700; color: var(--accent-red);">${totalAbsent}</td>`;
+                rowHTML += `<td style="font-weight: 600; color: var(--accent-blue);" title="Auto-calculated from previous month data">${prevMonthPresent}</td>`;
+                rowHTML += `<td style="font-weight: 700; background: rgba(59, 130, 246, 0.1);">${combinePresent}</td>`;
+
+                bodyHTML += `<tr>${rowHTML}</tr>`;
+            }
+
+            document.getElementById('table-body').innerHTML = bodyHTML;
+            calculateSummary();
+        }
+
+        async function toggleMonthlyAttendance(date, rollNo) {
+            const existing = await db.attendance.where({ date: date, rollNo: rollNo }).first();
+            
+            await db.attendance.where({ date: date, rollNo: rollNo }).delete();
+            
+            let newStatus = '';
+            if (!existing || existing.status === '') {
+                newStatus = 'present';
+            } else if (existing.status === 'present') {
+                newStatus = 'absent';
+            } else {
+                newStatus = '';
+            }
+
+            if (newStatus !== '') {
+                const record = { date: date, rollNo: rollNo, status: newStatus, remark: existing?.remark || '' };
+                await db.attendance.add(record);
+            } else {
+            }
+
+            loadMonthlyAttendance();
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // HOLIDAY MANAGER FUNCTIONS
+        // ═══════════════════════════════════════════════════════════════
+
+        function getSelectedMonthYear() {
+            const val = document.getElementById('attendance-month')?.value || currentMonth;
+            const [year, month] = val.split('-').map(Number);
+            return { year, month };
+        }
+
+        function countSundaysInMonth(year, month) {
+            const days = new Date(year, month, 0).getDate();
+            let sundays = 0;
+            for (let d = 1; d <= days; d++) {
+                if (new Date(year, month - 1, d).getDay() === 0) sundays++;
+            }
+            return sundays;
+        }
+
+        function getSundayDates(year, month) {
+            const days = new Date(year, month, 0).getDate();
+            const sundays = [];
+            for (let d = 1; d <= days; d++) {
+                if (new Date(year, month - 1, d).getDay() === 0) {
+                    sundays.push(`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+                }
+            }
+            return sundays;
+        }
+
+        async function populateDateDropdown() {
+            const { year, month } = getSelectedMonthYear();
+            const days = new Date(year, month, 0).getDate();
+            const select = document.getElementById('holiday-date-select');
+            if (!select) return;
+            const existing = await db.holidays.toArray();
+            const existingDates = new Set(existing.filter(h => h.date.startsWith(`${year}-${String(month).padStart(2,'0')}`)).map(h => h.date));
+            const sundays = new Set(getSundayDates(year, month));
+
+            select.innerHTML = '<option value="">-- pick a day --</option>';
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            for (let d = 1; d <= days; d++) {
+                const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(year, month-1, d).getDay()];
+                const isSun = sundays.has(dateStr);
+                const isHol = existingDates.has(dateStr);
+                if (!isSun && !isHol) {
+                    const opt = document.createElement('option');
+                    opt.value = dateStr;
+                    opt.textContent = `${d} ${months[month-1]} (${dow})`;
+                    select.appendChild(opt);
+                }
+            }
+        }
+
+        async function addHoliday() {
+            const dateVal = document.getElementById('holiday-date-select').value;
+            const nameVal = document.getElementById('holiday-name-input').value.trim();
+            if (!dateVal) { alert('Please select a date for the holiday.'); return; }
+            if (!nameVal) { alert('Please enter a holiday name.'); return; }
+
+            const existing = await db.holidays.where('date').equals(dateVal).first();
+            if (existing) { alert('A holiday already exists on this date!'); return; }
+
+            await db.holidays.add({ date: dateVal, name: nameVal });
+            document.getElementById('holiday-name-input').value = '';
+            await renderHolidayChips();
+            await populateDateDropdown();
+            calculateSummary();
+        }
+
+        async function removeHoliday(id) {
+            await db.holidays.delete(id);
+            await renderHolidayChips();
+            await populateDateDropdown();
+            calculateSummary();
+        }
+
+        async function renderHolidayChips() {
+            const { year, month } = getSelectedMonthYear();
+            const prefix = `${year}-${String(month).padStart(2,'0')}`;
+            const holidays = (await db.holidays.toArray()).filter(h => h.date.startsWith(prefix));
+            holidays.sort((a,b) => a.date.localeCompare(b.date));
+
+            const container = document.getElementById('holiday-chips');
+            if (!container) return;
+
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            container.innerHTML = holidays.map(h => {
+                const d = new Date(h.date + 'T00:00:00');
+                const label = `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()} – ${h.name}`;
+                return `<span style="display:inline-flex; align-items:center; gap:6px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); color:var(--text-primary); padding:6px 12px; border-radius:20px; font-size:13px; font-weight:600;">
+                    <span style="font-size:16px;">📅</span>${label}
+                    <button onclick="removeHoliday(${h.id})" style="background:none; border:none; color:#f87171; cursor:pointer; font-size:16px; line-height:1; padding:0 0 0 4px; font-weight:700;">&times;</button>
+                </span>`;
+            }).join('');
+        }
+
+        async function getHolidaysForMonth(year, month) {
+            const prefix = `${year}-${String(month).padStart(2,'0')}`;
+            return (await db.holidays.toArray()).filter(h => h.date.startsWith(prefix));
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // STUDENT MANAGER FUNCTIONS
+        // ═══════════════════════════════════════════════════════════════
+
+        async function addStudentManually() {
+            const rollNo = document.getElementById('new-roll').value.trim();
+            const name = document.getElementById('new-name').value.trim();
+            const gender = document.getElementById('new-gender').value;
+
+            if (!rollNo || !name) { alert('Please enter both Roll No and Student Name.'); return; }
+
+            const existing = await db.students.where('rollNo').equals(rollNo).first();
+            if (existing) { alert(`Roll No ${rollNo} already exists!`); return; }
+
+            await db.students.add({ rollNo, name, gender });
+
+            // Sync to cloud
+            const allStudents = await db.students.toArray();
+
+            document.getElementById('new-roll').value = '';
+            document.getElementById('new-name').value = '';
+
+            renderStudentManagerList();
+            loadDailyAttendance();
+        }
+
+        async function deleteStudent(id, rollNo, name) {
+            if (!confirm(`Delete student "${name}" (Roll: ${rollNo})?\n\nThis will also delete their attendance records.`)) return;
+            await db.students.delete(id);
+            await db.attendance.where('rollNo').equals(rollNo).delete();
+
+            // Sync to cloud
+            const allStudents = await db.students.toArray();
+
+            renderStudentManagerList();
+            loadDailyAttendance();
+        }
+
+        async function renderStudentManagerList() {
+            const students = await db.students.toArray();
+            const sorted = getSortedStudents(students);
+            const container = document.getElementById('student-manager-list');
+            if (!container) return;
+
+            if (sorted.length === 0) {
+                container.innerHTML = `<div style="padding:20px; text-align:center; color:var(--text-secondary); font-size:13px;">No students yet. Upload an Excel or add above.</div>`;
+                return;
+            }
+
+            container.innerHTML = sorted.map(s => {
+                const isFemale = s.gender.toLowerCase().startsWith('f');
+                const borderColor = isFemale ? '#f472b6' : '#60a5fa';
+                return `<div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); border-left:4px solid ${borderColor}; background:var(--bg-tertiary);">
+                    <span style="font-weight:700; font-size:13px; min-width:40px; color:${borderColor};">${s.rollNo}</span>
+                    <span style="flex:1; font-size:14px; font-weight:600;">${s.name}</span>
+                    <span style="font-size:11px; color:var(--text-secondary); background:rgba(255,255,255,0.07); padding:2px 8px; border-radius:20px;">${s.gender}</span>
+                    <button onclick="deleteStudent(${s.id}, '${s.rollNo.replace(/'/g,"\\'")}', '${s.name.replace(/'/g,"\\'")}' )"
+                        style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#f87171; border-radius:8px; padding:4px 10px; cursor:pointer; font-size:13px; font-weight:700;">✕</button>
+                </div>`;
+            }).join('');
+        }
+
+        async function calculateSummary() {
+            const currentMonth = document.getElementById('attendance-month').value;
+            if (!currentMonth) return;
+            const [year, month] = currentMonth.split('-').map(Number);
+            const daysInMonth = new Date(year, month, 0).getDate();
+
+            // Count holidays
+            const manualHolidays = await getHolidaysForMonth(year, month);
+            const sundaysCount = countSundaysInMonth(year, month);
+            const autoExcludeSundays = document.getElementById('auto-sundays')?.checked !== false;
+            const sundayDates = new Set(getSundayDates(year, month));
+            const manualHolidayDates = new Set(manualHolidays.map(h => h.date));
+
+            // Working days = total days - manual holidays - (Sundays if auto-exclude, not already counted as manual)
+            let excludedDays = manualHolidays.length;
+            if (autoExcludeSundays) {
+                // count sundays not already in manual holidays
+                getSundayDates(year, month).forEach(d => { if (!manualHolidayDates.has(d)) excludedDays++; });
+            }
+            const workingDays = daysInMonth - excludedDays;
+
+            // Update UI badges
+            const sundayBadge = document.getElementById('sunday-count-badge');
+            if (sundayBadge) sundayBadge.textContent = `${sundaysCount} Sundays`;
+            const wdEl = document.getElementById('working-days-display');
+            const thEl = document.getElementById('total-holidays-display');
+            if (wdEl) wdEl.textContent = workingDays;
+            if (thEl) thEl.textContent = excludedDays;
+
+            const students = await db.students.toArray();
+            const boysTotal = students.filter(s => s.gender.toLowerCase() === 'male').length;
+            const girlsTotal = students.filter(s => s.gender.toLowerCase() === 'female').length;
+
+            let boysPresentTotal = 0, boysAbsentTotal = 0;
+            let girlsPresentTotal = 0, girlsAbsentTotal = 0;
+
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                // Skip holidays & auto-sundays for percentage calculation (still count actuals)
+                for (let student of students) {
+                    const attendance = await db.attendance
+                        .where({ date: dateStr, rollNo: student.rollNo })
+                        .first();
+
+                    if (student.gender.toLowerCase() === 'male') {
+                        if (attendance?.status === 'present') boysPresentTotal++;
+                        if (attendance?.status === 'absent') boysAbsentTotal++;
+                    } else {
+                        if (attendance?.status === 'present') girlsPresentTotal++;
+                        if (attendance?.status === 'absent') girlsAbsentTotal++;
+                    }
+                }
+            }
+
+            const boysPercentage = boysTotal > 0 && workingDays > 0 
+                ? ((boysPresentTotal / (boysTotal * workingDays)) * 100).toFixed(2)
+                : 0;
+            const girlsPercentage = girlsTotal > 0 && workingDays > 0
+                ? ((girlsPresentTotal / (girlsTotal * workingDays)) * 100).toFixed(2)
+                : 0;
+
+            document.getElementById('total-present-boys').textContent = boysPresentTotal;
+            document.getElementById('total-absent-boys').textContent = boysAbsentTotal;
+            document.getElementById('total-present-girls').textContent = girlsPresentTotal;
+            document.getElementById('total-absent-girls').textContent = girlsAbsentTotal;
+            document.getElementById('combine-present-monthly').textContent = boysPresentTotal + girlsPresentTotal;
+            document.getElementById('combine-absent-monthly').textContent = boysAbsentTotal + girlsAbsentTotal;
+            document.getElementById('boys-percentage').textContent = boysPercentage + '%';
+            document.getElementById('girls-percentage').textContent = girlsPercentage + '%';
+
+            saveSettings();
+        }
+
+        async function saveSettings() {
+            // Settings saved via holiday store now; keep for backward compat
+        }
+
+        async function loadSettings() {
+            // Legacy: no-op, holiday manager loads from DB
+        }
+
+        async function exportExcel() {
+            const currentMonth = document.getElementById('attendance-month').value;
+            const [year, month] = currentMonth.split('-').map(Number);
+            const daysInMonth = new Date(year, month, 0).getDate();
+
+            const students = await db.students.toArray();
+            const sortedStudents = getSortedStudents(students);
+            
+            // Build header row exactly as in table
+            const headerRow = ['Roll No', 'Student Name', 'Gender'];
+            for (let day = 1; day <= daysInMonth; day++) {
+                headerRow.push(day);
+            }
+            headerRow.push('Total Present');
+            headerRow.push('Total Absent');
+            headerRow.push('Previous Month Present');
+            headerRow.push('Combine Present');
+
+            const data = [headerRow];
+
+            for (let student of sortedStudents) {
+                let row = [];
+                
+                // Auto-calculate previous month present per student
+                const prevMonthPresent = await getPrevMonthPresent(student.rollNo, year, month);
+
+                // First three columns - exactly as in table
+                row.push(student.rollNo);
+                row.push(student.name);
+                row.push(student.gender);
+
+                let totalPresent = 0;
+                let totalAbsent = 0;
+
+                // Then all the day columns
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const attendance = await db.attendance
+                        .where({ date: dateStr, rollNo: student.rollNo })
+                        .first();
+
+                    const status = attendance?.status === 'present' ? 'P' : attendance?.status === 'absent' ? 'A' : '';
+                    row.push(status);
+                    
+                    if (status === 'P') totalPresent++;
+                    if (status === 'A') totalAbsent++;
+                }
+
+                // Last four columns - exactly as in table
+                row.push(totalPresent);
+                row.push(totalAbsent);
+                row.push(prevMonthPresent);
+                row.push(totalPresent + prevMonthPresent);
+
+                data.push(row);
+            }
+
+            const ws = XLSX.utils.aoa_to_sheet(data);
+            
+            // Set column widths
+            ws['!cols'] = [
+                { wch: 10 },  // Roll No
+                { wch: 30 }, // Student Name
+                { wch: 12 }, // Gender
+            ];
+            
+            // Add width for day columns
+            for (let i = 0; i < daysInMonth; i++) {
+                ws['!cols'].push({ wch: 4 });
+            }
+            
+            // Add width for summary columns
+            ws['!cols'].push({ wch: 14 }); // Total Present
+            ws['!cols'].push({ wch: 14 }); // Total Absent
+            ws['!cols'].push({ wch: 22 }); // Previous Month Present
+            ws['!cols'].push({ wch: 16 }); // Combine Present
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
+            XLSX.writeFile(wb, `Attendance_${currentMonth}.xlsx`);
+        }
+
+        async function exportPDF() {
+            try {
+                // Get jsPDF - handle both window.jspdf and window.jsPDF
+                const jsPDFLib = window.jspdf || window.jsPDF;
+                if (typeof jsPDFLib === 'undefined') {
+                    alert('PDF library is loading... Please wait a moment and try again.');
+                    return;
+                }
+
+                const jsPDF = jsPDFLib.jsPDF || jsPDFLib;
+                const doc = new jsPDF('l', 'mm', 'a4');
+
+                // Check if autoTable is available
+                if (typeof doc.autoTable === 'undefined') {
+                    alert('PDF table plugin is not loaded. Please refresh the page and try again.');
+                    console.error('autoTable plugin not loaded');
+                    return;
+                }
+
+                const currentMonth = document.getElementById('attendance-month').value;
+                const [year, month] = currentMonth.split('-').map(Number);
+                const daysInMonth = new Date(year, month, 0).getDate();
+
+                const students = await db.students.toArray();
+                const sortedStudents = getSortedStudents(students);
+                const tableData = [];
+
+                for (let student of sortedStudents) {
+                    let row = [];
+                    
+                    // Auto-calculate previous month present per student
+                    const prevMonthPresent = await getPrevMonthPresent(student.rollNo, year, month);
+
+                    // First three columns - exactly as in table
+                    row.push(student.rollNo);
+                    row.push(student.name);
+                    row.push(student.gender);
+
+                    let totalPresent = 0;
+                    let totalAbsent = 0;
+
+                    // Then all the day columns
+                    for (let day = 1; day <= daysInMonth; day++) {
+                        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        const attendance = await db.attendance
+                            .where({ date: dateStr, rollNo: student.rollNo })
+                            .first();
+
+                        const status = attendance?.status === 'present' ? 'P' : attendance?.status === 'absent' ? 'A' : '';
+                        row.push(status);
+                        
+                        if (status === 'P') totalPresent++;
+                        if (status === 'A') totalAbsent++;
+                    }
+
+                    // Last four columns - exactly as in table
+                    row.push(totalPresent);
+                    row.push(totalAbsent);
+                    row.push(prevMonthPresent);
+                    row.push(totalPresent + prevMonthPresent);
+
+                    tableData.push(row);
+                }
+
+                // Build header - exactly as in table
+                let headers = [['Roll No', 'Student Name', 'Gender']];
+                
+                // Add day headers
+                for (let day = 1; day <= daysInMonth; day++) {
+                    headers[0].push(day.toString());
+                }
+                
+                // Add summary headers
+                headers[0].push('Total Present');
+                headers[0].push('Total Absent');
+                headers[0].push('Previous Month Present');
+                headers[0].push('Combine Present');
+
+                // Add title
+                doc.setFontSize(16);
+                doc.setFont('helvetica', 'bold');
+                doc.text(`Attendance Report - ${currentMonth}`, 14, 15);
+
+                // Create table with autoTable
+                doc.autoTable({
+                    head: headers,
+                    body: tableData,
+                    startY: 25,
+                    theme: 'grid',
+                    styles: { 
+                        fontSize: 7, 
+                        cellPadding: 1,
+                        halign: 'center',
+                        valign: 'middle'
+                    },
+                    headStyles: { 
+                        fillColor: [59, 130, 246],
+                        fontStyle: 'bold',
+                        fontSize: 7,
+                        halign: 'center'
+                    },
+                    columnStyles: {
+                        0: { cellWidth: 12, halign: 'center' },
+                        1: { cellWidth: 35, halign: 'left' },
+                        2: { cellWidth: 15, halign: 'center' }
+                    },
+                    didParseCell: function(data) {
+                        const colIndex = data.column.index;
+                        const totalCols = 3 + daysInMonth + 4;
+                        
+                        if (colIndex === totalCols - 4 && data.row.section === 'body') {
+                            data.cell.styles.fillColor = [220, 252, 231];
+                            data.cell.styles.textColor = [22, 163, 74];
+                            data.cell.styles.fontStyle = 'bold';
+                        }
+                        
+                        if (colIndex === totalCols - 3 && data.row.section === 'body') {
+                            data.cell.styles.fillColor = [254, 226, 226];
+                            data.cell.styles.textColor = [220, 38, 38];
+                            data.cell.styles.fontStyle = 'bold';
+                        }
+                        
+                        if (colIndex === totalCols - 1 && data.row.section === 'body') {
+                            data.cell.styles.fillColor = [219, 234, 254];
+                            data.cell.styles.textColor = [59, 130, 246];
+                            data.cell.styles.fontStyle = 'bold';
+                        }
+                    }
+                });
+
+                doc.save(`Attendance_${currentMonth}.pdf`);
+                
+            } catch (error) {
+                console.error('PDF Export Error:', error);
+                alert('Error creating PDF: ' + error.message + '\n\nPlease refresh the page and try again.');
+            }
+        }
+
+        async function clearAllData() {
+            if (confirm('Are you sure you want to clear all data? This cannot be undone!')) {
+                await db.students.clear();
+                await db.attendance.clear();
+                await db.settings.clear();
+                alert('All data has been cleared.');
+                loadDailyAttendance();
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // YEARLY WORKING DAYS SUMMARY FUNCTIONS
+        // ═══════════════════════════════════════════════════════════════
+
+        async function loadYearlySummary() {
+            const year = parseInt(document.getElementById('summary-year').value);
+            const fromMonth = parseInt(document.getElementById('summary-from-month').value);
+            const toMonth = parseInt(document.getElementById('summary-to-month').value);
+
+            if (!year || !fromMonth || !toMonth) return;
+
+            const monthNames = ['January','February','March','April','May','June',
+                                'July','August','September','October','November','December'];
+
+            // Determine month range (handle cross-year if from > to)
+            const months = [];
+            if (fromMonth <= toMonth) {
+                for (let m = fromMonth; m <= toMonth; m++) months.push({ year, month: m });
+            } else {
+                for (let m = fromMonth; m <= 12; m++) months.push({ year, month: m });
+                for (let m = 1; m <= toMonth; m++) months.push({ year: year + 1, month: m });
+            }
+
+            let runningTotal = 0;
+            let totalWorkingAll = 0, totalHolidaysAll = 0, totalSundaysAll = 0, totalDaysAll = 0;
+            let bodyHTML = '';
+
+            for (const { year: y, month: m } of months) {
+                const daysInMonth = new Date(y, m, 0).getDate();
+                totalDaysAll += daysInMonth;
+
+                // Count sundays
+                const sundayDates = getSundayDates(y, m);
+                const sundayCount = sundayDates.length;
+                totalSundaysAll += sundayCount;
+
+                // Count manual holidays
+                const manualHolidays = await getHolidaysForMonth(y, m);
+                const sundaySet = new Set(sundayDates);
+                const manualHolidayDates = new Set(manualHolidays.map(h => h.date));
+
+                // Check auto-sundays setting (use monthly tab setting if available)
+                const autoExcSun = document.getElementById('auto-sundays')?.checked !== false;
+
+                let excludedDays = manualHolidays.length;
+                if (autoExcSun) {
+                    sundayDates.forEach(d => { if (!manualHolidayDates.has(d)) excludedDays++; });
+                }
+                totalHolidaysAll += excludedDays;
+
+                const workingDays = daysInMonth - excludedDays;
+                runningTotal += workingDays;
+                totalWorkingAll += workingDays;
+
+                const isCurrentMonth = (y === new Date().getFullYear() && m === new Date().getMonth() + 1);
+                const rowStyle = isCurrentMonth ? 'background:rgba(16,185,129,0.08);' : '';
+
+                bodyHTML += `<tr style="${rowStyle}">
+                    <td class="month-name" style="text-align:left; font-weight:600;">
+                        ${isCurrentMonth ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:8px;vertical-align:middle;"></span>' : ''}
+                        ${monthNames[m-1]} ${y}
+                    </td>
+                    <td>${daysInMonth}</td>
+                    <td style="color:#f87171;">${autoExcSun ? sundayCount : 0}</td>
+                    <td style="color:#fbbf24;">${manualHolidays.length}</td>
+                    <td><span class="wd-badge">${workingDays}</span></td>
+                    <td><span class="running-total-badge">${runningTotal}</span></td>
+                </tr>`;
+            }
+
+            // Total row
+            bodyHTML += `<tr class="total-row">
+                <td class="month-name" style="font-weight:800; color:#10b981; text-align:left;">
+                    <i class="fas fa-sigma" style="margin-right:6px;"></i> TOTAL (${months.length} months)
+                </td>
+                <td>${totalDaysAll}</td>
+                <td>${totalSundaysAll}</td>
+                <td>${totalHolidaysAll - totalSundaysAll < 0 ? 0 : totalHolidaysAll - totalSundaysAll}</td>
+                <td><span class="wd-badge" style="font-size:17px;">${totalWorkingAll}</span></td>
+                <td><span class="running-total-badge" style="font-size:17px;">${totalWorkingAll}</span></td>
+            </tr>`;
+
+            document.getElementById('yearly-summary-body').innerHTML = bodyHTML;
+
+            // Stat cards
+            document.getElementById('summary-stat-cards').innerHTML = `
+                <div class="summary-card" style="background:linear-gradient(135deg,#10b981,#059669); color:white; padding:20px; border-radius:12px;">
+                    <div class="summary-title" style="font-size:11px; text-transform:uppercase; letter-spacing:1px; opacity:0.9; margin-bottom:8px;">Total Working Days</div>
+                    <div style="font-size:42px; font-weight:800; font-family:'JetBrains Mono',monospace;">${totalWorkingAll}</div>
+                    <div style="font-size:12px; opacity:0.85; margin-top:4px;">${months.length} months tracked</div>
+                </div>
+                <div class="summary-card" style="background:linear-gradient(135deg,#ef4444,#dc2626); color:white; padding:20px; border-radius:12px;">
+                    <div class="summary-title" style="font-size:11px; text-transform:uppercase; letter-spacing:1px; opacity:0.9; margin-bottom:8px;">Total Holidays</div>
+                    <div style="font-size:42px; font-weight:800; font-family:'JetBrains Mono',monospace;">${totalHolidaysAll}</div>
+                    <div style="font-size:12px; opacity:0.85; margin-top:4px;">Sundays + manual holidays</div>
+                </div>
+                <div class="summary-card" style="background:linear-gradient(135deg,#3b82f6,#2563eb); color:white; padding:20px; border-radius:12px;">
+                    <div class="summary-title" style="font-size:11px; text-transform:uppercase; letter-spacing:1px; opacity:0.9; margin-bottom:8px;">Total Calendar Days</div>
+                    <div style="font-size:42px; font-weight:800; font-family:'JetBrains Mono',monospace;">${totalDaysAll}</div>
+                    <div style="font-size:12px; opacity:0.85; margin-top:4px;">Across selected range</div>
+                </div>
+                <div class="summary-card" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9); color:white; padding:20px; border-radius:12px;">
+                    <div class="summary-title" style="font-size:11px; text-transform:uppercase; letter-spacing:1px; opacity:0.9; margin-bottom:8px;">Avg Working Days/Month</div>
+                    <div style="font-size:42px; font-weight:800; font-family:'JetBrains Mono',monospace;">${months.length > 0 ? (totalWorkingAll / months.length).toFixed(1) : 0}</div>
+                    <div style="font-size:12px; opacity:0.85; margin-top:4px;">Per month average</div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
