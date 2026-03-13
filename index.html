@@ -157,6 +157,51 @@
             color: white;
         }
         
+        .daily-class-section {
+            padding: 0 20px 12px;
+            background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .daily-class-select {
+            padding: 12px 14px;
+            border: none;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 14px;
+            font-family: 'Poppins', sans-serif;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 32px;
+        }
+
+        .daily-class-select.class-sel {
+            background-color: #fff3e0;
+            color: #e65100;
+        }
+
+        .daily-class-select.section-sel {
+            background-color: #e8f5e9;
+            color: #1b5e20;
+        }
+
+        [data-theme="light"] .daily-class-select.class-sel {
+            background-color: #fff3e0;
+            color: #e65100;
+        }
+
+        [data-theme="light"] .daily-class-select.section-sel {
+            background-color: #e8f5e9;
+            color: #1b5e20;
+        }
+
         .daily-mark-all-section {
             padding: 0 20px 16px;
             background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
@@ -764,6 +809,66 @@
             font-weight: 700;
             font-size: 15px;
         }
+        /* BACKUP / RESTORE */
+        .backup-restore-section {
+            background: var(--bg-secondary);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 2px solid rgba(99,102,241,0.35);
+        }
+
+        .backup-btn {
+            flex: 1;
+            padding: 16px 12px;
+            border: none;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 15px;
+            cursor: pointer;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .backup-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+        }
+
+        .backup-btn.do-backup {
+            background: linear-gradient(135deg, #6366f1, #4f46e5);
+            color: #ffffff;
+        }
+
+        .backup-btn.do-restore {
+            background: linear-gradient(135deg, #0ea5e9, #0284c7);
+            color: #ffffff;
+        }
+
+        [data-theme="light"] .backup-btn.do-backup {
+            background: linear-gradient(135deg, #6366f1, #4f46e5);
+            color: #ffffff;
+        }
+
+        [data-theme="light"] .backup-btn.do-restore {
+            background: linear-gradient(135deg, #0ea5e9, #0284c7);
+            color: #ffffff;
+        }
+
+        .backup-note {
+            margin-top: 12px;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 12px;
+            line-height: 1.6;
+            background: rgba(99,102,241,0.08);
+            color: var(--text-secondary);
+            border-left: 3px solid #6366f1;
+        }
     </style>
 </head>
 <body>
@@ -775,7 +880,7 @@
     <!-- Daily Attendance Tab -->
     <div id="tab-daily" class="tab-content active daily-view">
         <div class="daily-top-header">
-            <div class="daily-app-title">SAT V1.0</div>
+            <div class="daily-app-title">SAT V2.0</div>
             <div class="daily-app-subtitle">Student App</div>
             <button class="daily-theme-toggle" onclick="toggleTheme()">
                 <i class="fas fa-moon" id="daily-theme-icon"></i>
@@ -797,6 +902,32 @@
                 GIRLS A: <span id="girls-absent">0</span><br>
                 COMBINE A: <span id="combine-absent">0</span>
             </div>
+        </div>
+
+        <div class="daily-class-section">
+            <select id="class-select" class="daily-class-select class-sel" onchange="saveClassSection()">
+                <option value="">-- Class --</option>
+                <option value="IX">Class IX</option>
+                <option value="X">Class X</option>
+                <option value="XI">Class XI</option>
+                <option value="XII">Class XII</option>
+            </select>
+            <select id="section-select" class="daily-class-select section-sel" onchange="saveClassSection()">
+                <option value="">-- Section --</option>
+                <option value="A">Section A</option>
+                <option value="B">Section B</option>
+                <option value="C">Section C</option>
+                <option value="D">Section D</option>
+                <option value="E">Section E</option>
+                <option value="F">Section F</option>
+                <option value="G">Section G</option>
+                <option value="H">Section H</option>
+                <option value="I">Section I</option>
+                <option value="J">Section J</option>
+                <option value="K">Section K</option>
+                <option value="L">Section L</option>
+                <option value="M">Section M</option>
+            </select>
         </div>
 
         <div class="daily-mark-all-section">
@@ -1005,6 +1136,29 @@
                 </p>
             </div>
             
+            <!-- ══ BACKUP & RESTORE ══ -->
+            <div class="backup-restore-section">
+                <h3 style="font-size:18px; font-weight:700; margin-bottom:6px; display:flex; align-items:center; gap:10px;">
+                    <i class="fas fa-shield-alt" style="color:#6366f1;"></i> Backup &amp; Restore
+                    <span style="font-size:12px; font-weight:500; color:var(--text-secondary);">Protect your data</span>
+                </h3>
+                <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">
+                    Save all students, attendance records and holidays to a file on your device. Restore anytime — even after clearing browser data.
+                </p>
+                <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                    <button class="backup-btn do-backup" onclick="backupData()">
+                        <i class="fas fa-download"></i> Backup Data
+                    </button>
+                    <button class="backup-btn do-restore" onclick="document.getElementById('restore-file-input').click()">
+                        <i class="fas fa-upload"></i> Restore Data
+                    </button>
+                    <input type="file" id="restore-file-input" accept=".json" style="display:none;" onchange="restoreData(event)">
+                </div>
+                <div class="backup-note">
+                    💡 <strong>Backup</strong> saves a <code>.json</code> file to your Downloads. <strong>Restore</strong> loads that file back — existing data will be replaced. Keep your backup file safe (Google Drive, WhatsApp, USB, etc.).
+                </div>
+            </div>
+
             <div style="background: var(--bg-secondary); padding: 20px; border-radius: 12px; margin-bottom: 16px;">
                 <h3 style="margin-bottom: 12px; font-size: 18px; font-weight: 700;">
                     <i class="fas fa-info-circle"></i> Instructions
@@ -1143,6 +1297,12 @@
                 document.getElementById('daily-theme-icon').className = 'fas fa-sun';
             }
 
+            // Restore saved class/section
+            const savedClass = localStorage.getItem('selectedClass') || '';
+            const savedSection = localStorage.getItem('selectedSection') || '';
+            document.getElementById('class-select').value = savedClass;
+            document.getElementById('section-select').value = savedSection;
+
             // Populate summary year dropdown
             const yearSel = document.getElementById('summary-year');
             const thisYear = new Date().getFullYear();
@@ -1153,13 +1313,27 @@
                 if (y === thisYear) opt.selected = true;
                 yearSel.appendChild(opt);
             }
-            // Set default from/to months (June to current month for academic year feel)
             document.getElementById('summary-from-month').value = '6';
             const toSel = document.getElementById('summary-to-month');
             toSel.value = String(new Date().getMonth() + 1);
 
             loadDailyAttendance();
         });
+
+        function saveClassSection() {
+            localStorage.setItem('selectedClass', document.getElementById('class-select').value);
+            localStorage.setItem('selectedSection', document.getElementById('section-select').value);
+        }
+
+        function getClassTitle() {
+            const cls = document.getElementById('class-select').value;
+            const sec = document.getElementById('section-select').value;
+            if (!cls && !sec) return '';
+            let title = '';
+            if (cls) title += `Class ${cls}`;
+            if (sec) title += (title ? ' - ' : '') + `Section ${sec}`;
+            return title;
+        }
 
         // PWA Install
         window.addEventListener('beforeinstallprompt', (e) => {
@@ -1836,6 +2010,7 @@
             const currentMonth = document.getElementById('attendance-month').value;
             const [year, month] = currentMonth.split('-').map(Number);
             const daysInMonth = new Date(year, month, 0).getDate();
+            const classTitle = getClassTitle();
 
             const students = await db.students.toArray();
             const sortedStudents = getSortedStudents(students);
@@ -1850,7 +2025,9 @@
             headerRow.push('Previous Month Present');
             headerRow.push('Combine Present');
 
-            const data = [headerRow];
+            // Title row at top if class is selected
+            const titleRow = classTitle ? [`Attendance Report - ${classTitle} | Month: ${currentMonth}`] : [`Attendance Report | Month: ${currentMonth}`];
+            const data = [titleRow, headerRow];
 
             for (let student of sortedStudents) {
                 let row = [];
@@ -1910,8 +2087,12 @@
             ws['!cols'].push({ wch: 16 }); // Combine Present
 
             const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
-            XLSX.writeFile(wb, `Attendance_${currentMonth}.xlsx`);
+            const sheetName = classTitle ? classTitle.replace(/\s*-\s*/g, '_').substring(0, 31) : 'Attendance';
+            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+            const fileName = classTitle
+                ? `Attendance_${classTitle.replace(/\s+/g,'_')}_${currentMonth}.xlsx`
+                : `Attendance_${currentMonth}.xlsx`;
+            XLSX.writeFile(wb, fileName);
         }
 
         async function exportPDF() {
@@ -1993,9 +2174,13 @@
                 headers[0].push('Combine Present');
 
                 // Add title
+                const classTitle = getClassTitle();
                 doc.setFontSize(16);
                 doc.setFont('helvetica', 'bold');
-                doc.text(`Attendance Report - ${currentMonth}`, 14, 15);
+                const mainTitle = classTitle
+                    ? `Attendance Report - ${classTitle} | ${currentMonth}`
+                    : `Attendance Report - ${currentMonth}`;
+                doc.text(mainTitle, 14, 15);
 
                 // Create table with autoTable
                 doc.autoTable({
@@ -2044,12 +2229,96 @@
                     }
                 });
 
-                doc.save(`Attendance_${currentMonth}.pdf`);
+                const pdfFileName = classTitle
+                    ? `Attendance_${classTitle.replace(/\s+/g,'_')}_${currentMonth}.pdf`
+                    : `Attendance_${currentMonth}.pdf`;
+                doc.save(pdfFileName);
                 
             } catch (error) {
                 console.error('PDF Export Error:', error);
                 alert('Error creating PDF: ' + error.message + '\n\nPlease refresh the page and try again.');
             }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // BACKUP & RESTORE FUNCTIONS
+        // ═══════════════════════════════════════════════════════════════
+
+        async function backupData() {
+            try {
+                const students  = await db.students.toArray();
+                const attendance = await db.attendance.toArray();
+                const holidays  = await db.holidays.toArray();
+                const settings  = await db.settings.toArray();
+
+                const backup = {
+                    version: 1,
+                    exportedAt: new Date().toISOString(),
+                    students,
+                    attendance,
+                    holidays,
+                    settings
+                };
+
+                const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+                const url  = URL.createObjectURL(blob);
+                const a    = document.createElement('a');
+                const date = new Date().toISOString().split('T')[0];
+                a.href     = url;
+                a.download = `SAT_Backup_${date}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+
+                alert(`✅ Backup saved!\n\nFile: SAT_Backup_${date}.json\nStudents: ${students.length} | Attendance records: ${attendance.length} | Holidays: ${holidays.length}\n\nStore this file safely (Google Drive, WhatsApp, USB etc.)`);
+            } catch (err) {
+                alert('❌ Backup failed: ' + err.message);
+            }
+        }
+
+        async function restoreData(event) {
+            const file = event.target.files[0];
+            event.target.value = ''; // reset so same file can be picked again
+            if (!file) return;
+
+            if (!confirm('⚠️ Restore will REPLACE all current data with the backup.\n\nAre you sure you want to continue?')) return;
+
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                try {
+                    const backup = JSON.parse(e.target.result);
+
+                    if (!backup.version || !Array.isArray(backup.students) || !Array.isArray(backup.attendance)) {
+                        alert('❌ Invalid backup file. Please select a valid SAT backup (.json).');
+                        return;
+                    }
+
+                    // Clear existing data
+                    await db.students.clear();
+                    await db.attendance.clear();
+                    await db.holidays.clear();
+                    await db.settings.clear();
+
+                    // Restore — strip auto-generated id so Dexie reassigns them cleanly
+                    const strip = arr => arr.map(({ id, ...rest }) => rest);
+
+                    if (backup.students.length)   await db.students.bulkAdd(strip(backup.students));
+                    if (backup.attendance.length) await db.attendance.bulkAdd(strip(backup.attendance));
+                    if (backup.holidays.length)   await db.holidays.bulkAdd(strip(backup.holidays));
+                    if (backup.settings?.length)  {
+                        for (const s of backup.settings) {
+                            await db.settings.put({ key: s.key, value: s.value });
+                        }
+                    }
+
+                    alert(`✅ Restore complete!\n\nStudents: ${backup.students.length} | Attendance records: ${backup.attendance.length} | Holidays: ${backup.holidays.length}\n\nBackup was from: ${backup.exportedAt ? new Date(backup.exportedAt).toLocaleString() : 'unknown date'}`);
+
+                    loadDailyAttendance();
+                    renderStudentManagerList();
+                } catch (err) {
+                    alert('❌ Restore failed: ' + err.message + '\n\nMake sure you selected a valid SAT backup file.');
+                }
+            };
+            reader.readAsText(file);
         }
 
         async function clearAllData() {
