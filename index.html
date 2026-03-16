@@ -869,6 +869,29 @@
             color: var(--text-secondary);
             border-left: 3px solid #6366f1;
         }
+
+        /* HOLIDAY BANNER - Daily tab */
+        .holiday-banner {
+            margin: 0 20px 16px;
+            padding: 20px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: white;
+            text-align: center;
+            box-shadow: 0 8px 24px rgba(245,158,11,0.4);
+            animation: fadeIn 0.4s ease;
+        }
+        .holiday-banner .hb-icon { font-size: 36px; margin-bottom: 8px; }
+        .holiday-banner .hb-title { font-size: 20px; font-weight: 800; margin-bottom: 4px; font-family:'Poppins',sans-serif; }
+        .holiday-banner .hb-name  { font-size: 15px; font-weight: 600; opacity: 0.95; }
+        .holiday-banner .hb-sub   { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+
+        /* VACATION RANGE UI */
+        .vacation-range-row {
+            display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-top:14px;
+            padding-top:14px; border-top:1px dashed rgba(255,255,255,0.12);
+        }
+        [data-theme="light"] .vacation-range-row { border-top-color: rgba(0,0,0,0.1); }
     </style>
 </head>
 <body>
@@ -1001,6 +1024,34 @@
                     </div>
                     <button onclick="addHoliday()" style="padding:10px 20px; background:linear-gradient(135deg,#f97316,#ea580c); color:white; border:none; border-radius:10px; font-weight:700; font-size:14px; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:6px; align-self:flex-end;">
                         ➕ Add Holiday
+                    </button>
+                </div>
+
+                <!-- Vacation Range Row -->
+                <div class="vacation-range-row">
+                    <div style="width:100%; margin-bottom:4px;">
+                        <span style="font-size:12px; font-weight:700; color:#a78bfa; text-transform:uppercase; letter-spacing:0.5px;">🏖️ Add Vacation / Multi-Day Holiday</span>
+                    </div>
+                    <div style="flex:1; min-width:130px;">
+                        <label style="font-size:11px; color:var(--text-secondary); font-weight:600; display:block; margin-bottom:5px;">From Date:</label>
+                        <select id="vacation-from-select" style="width:100%; padding:9px 12px; border-radius:10px; border:2px solid rgba(167,139,250,0.4); background:var(--bg-tertiary); color:var(--text-primary); font-size:13px; font-weight:600; cursor:pointer;">
+                            <option value="">-- start day --</option>
+                        </select>
+                    </div>
+                    <div style="flex:1; min-width:130px;">
+                        <label style="font-size:11px; color:var(--text-secondary); font-weight:600; display:block; margin-bottom:5px;">To Date:</label>
+                        <select id="vacation-to-select" style="width:100%; padding:9px 12px; border-radius:10px; border:2px solid rgba(167,139,250,0.4); background:var(--bg-tertiary); color:var(--text-primary); font-size:13px; font-weight:600; cursor:pointer;">
+                            <option value="">-- end day --</option>
+                        </select>
+                    </div>
+                    <div style="flex:2; min-width:160px;">
+                        <label style="font-size:11px; color:var(--text-secondary); font-weight:600; display:block; margin-bottom:5px;">Vacation Name:</label>
+                        <input type="text" id="vacation-name-input" placeholder="e.g. Summer Vacation, Diwali Vacation"
+                               style="width:100%; padding:9px 12px; border-radius:10px; border:2px solid rgba(167,139,250,0.4); background:var(--bg-tertiary); color:var(--text-primary); font-size:13px;"
+                               onkeydown="if(event.key==='Enter') addVacationRange()">
+                    </div>
+                    <button onclick="addVacationRange()" style="padding:9px 18px; background:linear-gradient(135deg,#8b5cf6,#6d28d9); color:white; border:none; border-radius:10px; font-weight:700; font-size:13px; cursor:pointer; white-space:nowrap; align-self:flex-end; display:flex; align-items:center; gap:6px;">
+                        🏖️ Add Vacation
                     </button>
                 </div>
 
@@ -1186,22 +1237,26 @@
             </div>
 
             <div style="background:var(--bg-secondary); border-radius:12px; padding:16px; margin-bottom:20px; display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
-                <div style="flex:1; min-width:120px;">
-                    <label style="display:block; font-size:12px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Select Year</label>
-                    <select id="summary-year" onchange="loadYearlySummary()" style="width:100%; padding:12px; border:2px solid var(--bg-tertiary); border-radius:8px; background:var(--bg-primary); color:var(--text-primary); font-size:16px; font-family:'Inter',sans-serif;"></select>
+                <div style="flex:1; min-width:110px;">
+                    <label style="display:block; font-size:12px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">From Year</label>
+                    <select id="summary-from-year" onchange="loadYearlySummary()" style="width:100%; padding:12px; border:2px solid var(--bg-tertiary); border-radius:8px; background:var(--bg-primary); color:var(--text-primary); font-size:15px; font-family:'Inter',sans-serif;"></select>
                 </div>
-                <div style="flex:1; min-width:120px;">
+                <div style="flex:1; min-width:110px;">
                     <label style="display:block; font-size:12px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">From Month</label>
-                    <select id="summary-from-month" onchange="loadYearlySummary()" style="width:100%; padding:12px; border:2px solid var(--bg-tertiary); border-radius:8px; background:var(--bg-primary); color:var(--text-primary); font-size:16px; font-family:'Inter',sans-serif;">
+                    <select id="summary-from-month" onchange="loadYearlySummary()" style="width:100%; padding:12px; border:2px solid var(--bg-tertiary); border-radius:8px; background:var(--bg-primary); color:var(--text-primary); font-size:15px; font-family:'Inter',sans-serif;">
                         <option value="1">January</option><option value="2">February</option><option value="3">March</option>
                         <option value="4">April</option><option value="5">May</option><option value="6">June</option>
                         <option value="7">July</option><option value="8">August</option><option value="9">September</option>
                         <option value="10">October</option><option value="11">November</option><option value="12">December</option>
                     </select>
                 </div>
-                <div style="flex:1; min-width:120px;">
+                <div style="flex:1; min-width:110px;">
+                    <label style="display:block; font-size:12px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">To Year</label>
+                    <select id="summary-to-year" onchange="loadYearlySummary()" style="width:100%; padding:12px; border:2px solid var(--bg-tertiary); border-radius:8px; background:var(--bg-primary); color:var(--text-primary); font-size:15px; font-family:'Inter',sans-serif;"></select>
+                </div>
+                <div style="flex:1; min-width:110px;">
                     <label style="display:block; font-size:12px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">To Month</label>
-                    <select id="summary-to-month" onchange="loadYearlySummary()" style="width:100%; padding:12px; border:2px solid var(--bg-tertiary); border-radius:8px; background:var(--bg-primary); color:var(--text-primary); font-size:16px; font-family:'Inter',sans-serif;">
+                    <select id="summary-to-month" onchange="loadYearlySummary()" style="width:100%; padding:12px; border:2px solid var(--bg-tertiary); border-radius:8px; background:var(--bg-primary); color:var(--text-primary); font-size:15px; font-family:'Inter',sans-serif;">
                         <option value="1">January</option><option value="2">February</option><option value="3">March</option>
                         <option value="4">April</option><option value="5">May</option><option value="6">June</option>
                         <option value="7">July</option><option value="8">August</option><option value="9">September</option>
@@ -1278,6 +1333,12 @@
             settings: 'key, value',
             holidays: '++id, date, name'
         });
+        db.version(4).stores({
+            students: '++id, rollNo, name, gender',
+            attendance: '++id, date, rollNo, status, remark',
+            settings: 'key, value',
+            holidays: '++id, date, name, groupId'
+        });
 
         let deferredPrompt;
         let currentDate = new Date().toISOString().split('T')[0];
@@ -1303,19 +1364,23 @@
             document.getElementById('class-select').value = savedClass;
             document.getElementById('section-select').value = savedSection;
 
-            // Populate summary year dropdown
-            const yearSel = document.getElementById('summary-year');
+            // Populate summary year dropdowns (2015 – 2040)
+            const fromYearSel = document.getElementById('summary-from-year');
+            const toYearSel   = document.getElementById('summary-to-year');
             const thisYear = new Date().getFullYear();
-            for (let y = thisYear - 2; y <= thisYear + 1; y++) {
-                const opt = document.createElement('option');
-                opt.value = y;
-                opt.textContent = y;
-                if (y === thisYear) opt.selected = true;
-                yearSel.appendChild(opt);
+            for (let y = 2015; y <= 2040; y++) {
+                const o1 = document.createElement('option');
+                o1.value = y; o1.textContent = y;
+                if (y === thisYear) o1.selected = true;
+                fromYearSel.appendChild(o1);
+
+                const o2 = document.createElement('option');
+                o2.value = y; o2.textContent = y;
+                if (y === thisYear) o2.selected = true;
+                toYearSel.appendChild(o2);
             }
             document.getElementById('summary-from-month').value = '6';
-            const toSel = document.getElementById('summary-to-month');
-            toSel.value = String(new Date().getMonth() + 1);
+            document.getElementById('summary-to-month').value = String(new Date().getMonth() + 1);
 
             loadDailyAttendance();
         });
@@ -1466,6 +1531,25 @@
             const sortedStudents = getSortedStudents(students);
             const listContainer = document.getElementById('student-list');
 
+            // ── Holiday check ──
+            const holiday = await db.holidays.where('date').equals(currentDate).first();
+            const [cy, cm, cd] = currentDate.split('-').map(Number);
+            const isSunday = new Date(cy, cm - 1, cd).getDay() === 0;
+            const autoExcSun = document.getElementById('auto-sundays')?.checked !== false;
+
+            if (holiday || (isSunday && autoExcSun)) {
+                const holidayName = holiday ? holiday.name : 'Sunday';
+                listContainer.innerHTML = `
+                    <div class="holiday-banner">
+                        <div class="hb-icon">🏖️</div>
+                        <div class="hb-title">Holiday — No Attendance</div>
+                        <div class="hb-name">${holidayName}</div>
+                        <div class="hb-sub">${currentDate} · This day is marked as a holiday.<br>Attendance marking is disabled.</div>
+                    </div>`;
+                updateDailyStats(0, 0, 0, 0);
+                return;
+            }
+
             if (sortedStudents.length === 0) {
                 listContainer.innerHTML = `
                     <div class="empty-state">
@@ -1553,6 +1637,12 @@
         }
 
         async function markDailyAttendance(rollNo, status) {
+            // Block if holiday
+            const holiday = await db.holidays.where('date').equals(currentDate).first();
+            const [cy, cm, cd] = currentDate.split('-').map(Number);
+            const isSun = new Date(cy, cm - 1, cd).getDay() === 0;
+            const autoExcSun = document.getElementById('auto-sundays')?.checked !== false;
+            if (holiday || (isSun && autoExcSun)) return;
             const existing = await db.attendance.where({ date: currentDate, rollNo: rollNo }).first();
             await db.attendance.where({ date: currentDate, rollNo: rollNo }).delete();
             
@@ -1592,6 +1682,12 @@
         }
 
         async function markAllToday(status) {
+            // Block if holiday
+            const holiday = await db.holidays.where('date').equals(currentDate).first();
+            const [cy, cm, cd] = currentDate.split('-').map(Number);
+            const isSun = new Date(cy, cm - 1, cd).getDay() === 0;
+            const autoExcSun = document.getElementById('auto-sundays')?.checked !== false;
+            if (holiday || (isSun && autoExcSun)) { alert('This day is a holiday. Attendance marking is disabled.'); return; }
             const students = await db.students.toArray();
             const records = [];
             
@@ -1813,6 +1909,21 @@
                     select.appendChild(opt);
                 }
             }
+
+            // Also populate vacation range dropdowns (all non-Sunday days, allow already-holiday overlap for flexibility)
+            const vFrom = document.getElementById('vacation-from-select');
+            const vTo   = document.getElementById('vacation-to-select');
+            if (vFrom && vTo) {
+                const allDayOpts = '<option value="">-- start day --</option>' +
+                    Array.from({length: days}, (_, i) => {
+                        const d = i + 1;
+                        const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                        const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(year, month-1, d).getDay()];
+                        return `<option value="${dateStr}">${d} ${months[month-1]} (${dow})</option>`;
+                    }).join('');
+                vFrom.innerHTML = allDayOpts.replace('-- start day --', '-- start day --');
+                vTo.innerHTML   = allDayOpts.replace('-- start day --', '-- end day --');
+            }
         }
 
         async function addHoliday() {
@@ -1831,8 +1942,43 @@
             calculateSummary();
         }
 
-        async function removeHoliday(id) {
-            await db.holidays.delete(id);
+        async function addVacationRange() {
+            const fromDate = document.getElementById('vacation-from-select').value;
+            const toDate   = document.getElementById('vacation-to-select').value;
+            const nameVal  = document.getElementById('vacation-name-input').value.trim();
+            if (!fromDate) { alert('Please select a start date.'); return; }
+            if (!toDate)   { alert('Please select an end date.'); return; }
+            if (!nameVal)  { alert('Please enter a vacation name.'); return; }
+            if (fromDate > toDate) { alert('Start date must be before or same as end date.'); return; }
+
+            // Generate all dates in range
+            const groupId = 'vac_' + Date.now();
+            const start = new Date(fromDate + 'T00:00:00');
+            const end   = new Date(toDate   + 'T00:00:00');
+            let added = 0;
+            for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                const dateStr = d.toISOString().split('T')[0];
+                const existing = await db.holidays.where('date').equals(dateStr).first();
+                if (!existing) {
+                    await db.holidays.add({ date: dateStr, name: nameVal, groupId });
+                    added++;
+                }
+            }
+            document.getElementById('vacation-name-input').value = '';
+            await renderHolidayChips();
+            await populateDateDropdown();
+            calculateSummary();
+            if (added === 0) alert('All dates in this range are already marked as holidays.');
+        }
+
+        async function removeHoliday(id, groupId) {
+            if (groupId) {
+                // Remove entire vacation group
+                const all = await db.holidays.where('groupId').equals(groupId).toArray();
+                for (const h of all) await db.holidays.delete(h.id);
+            } else {
+                await db.holidays.delete(id);
+            }
             await renderHolidayChips();
             await populateDateDropdown();
             calculateSummary();
@@ -1848,14 +1994,41 @@
             if (!container) return;
 
             const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-            container.innerHTML = holidays.map(h => {
-                const d = new Date(h.date + 'T00:00:00');
-                const label = `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()} – ${h.name}`;
-                return `<span style="display:inline-flex; align-items:center; gap:6px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); color:var(--text-primary); padding:6px 12px; border-radius:20px; font-size:13px; font-weight:600;">
-                    <span style="font-size:16px;">📅</span>${label}
-                    <button onclick="removeHoliday(${h.id})" style="background:none; border:none; color:#f87171; cursor:pointer; font-size:16px; line-height:1; padding:0 0 0 4px; font-weight:700;">&times;</button>
-                </span>`;
-            }).join('');
+
+            // Group by groupId — vacations shown as range chip; singles shown individually
+            const rendered = new Set();
+            const chips = [];
+
+            for (const h of holidays) {
+                if (rendered.has(h.id)) continue;
+
+                if (h.groupId) {
+                    // Find all in this group that are in the current view (may span across months but show range label)
+                    const groupAll = (await db.holidays.where('groupId').equals(h.groupId).toArray())
+                        .sort((a,b) => a.date.localeCompare(b.date));
+                    groupAll.forEach(x => rendered.add(x.id));
+
+                    const firstDate = new Date(groupAll[0].date + 'T00:00:00');
+                    const lastDate  = new Date(groupAll[groupAll.length - 1].date + 'T00:00:00');
+                    const fLabel = `${firstDate.getDate()} ${months[firstDate.getMonth()]} ${firstDate.getFullYear()}`;
+                    const lLabel = `${lastDate.getDate()} ${months[lastDate.getMonth()]} ${lastDate.getFullYear()}`;
+                    const rangeLabel = fLabel === lLabel ? fLabel : `${fLabel} to ${lLabel}`;
+                    chips.push(`<span style="display:inline-flex; align-items:center; gap:6px; background:rgba(139,92,246,0.15); border:1px solid rgba(139,92,246,0.5); color:var(--text-primary); padding:6px 12px; border-radius:20px; font-size:13px; font-weight:600;">
+                        <span style="font-size:16px;">🏖️</span>${rangeLabel} – ${h.name} <span style="font-size:10px; opacity:0.7;">(${groupAll.length}d)</span>
+                        <button onclick="removeHoliday(${h.id},'${h.groupId}')" style="background:none; border:none; color:#f87171; cursor:pointer; font-size:16px; line-height:1; padding:0 0 0 4px; font-weight:700;">&times;</button>
+                    </span>`);
+                } else {
+                    rendered.add(h.id);
+                    const d = new Date(h.date + 'T00:00:00');
+                    const label = `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()} – ${h.name}`;
+                    chips.push(`<span style="display:inline-flex; align-items:center; gap:6px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); color:var(--text-primary); padding:6px 12px; border-radius:20px; font-size:13px; font-weight:600;">
+                        <span style="font-size:16px;">📅</span>${label}
+                        <button onclick="removeHoliday(${h.id},null)" style="background:none; border:none; color:#f87171; cursor:pointer; font-size:16px; line-height:1; padding:0 0 0 4px; font-weight:700;">&times;</button>
+                    </span>`);
+                }
+            }
+
+            container.innerHTML = chips.join('');
         }
 
         async function getHolidaysForMonth(year, month) {
@@ -2336,22 +2509,30 @@
         // ═══════════════════════════════════════════════════════════════
 
         async function loadYearlySummary() {
-            const year = parseInt(document.getElementById('summary-year').value);
+            const fromYear  = parseInt(document.getElementById('summary-from-year').value);
             const fromMonth = parseInt(document.getElementById('summary-from-month').value);
-            const toMonth = parseInt(document.getElementById('summary-to-month').value);
+            const toYear    = parseInt(document.getElementById('summary-to-year').value);
+            const toMonth   = parseInt(document.getElementById('summary-to-month').value);
 
-            if (!year || !fromMonth || !toMonth) return;
+            if (!fromYear || !fromMonth || !toYear || !toMonth) return;
+
+            // Validate: from must be <= to
+            if (fromYear > toYear || (fromYear === toYear && fromMonth > toMonth)) {
+                document.getElementById('yearly-summary-body').innerHTML =
+                    `<tr><td colspan="6" style="padding:30px; text-align:center; color:#f87171;">⚠️ "From" date must be before or same as "To" date.</td></tr>`;
+                return;
+            }
 
             const monthNames = ['January','February','March','April','May','June',
                                 'July','August','September','October','November','December'];
 
-            // Determine month range (handle cross-year if from > to)
+            // Build list of {year, month} pairs
             const months = [];
-            if (fromMonth <= toMonth) {
-                for (let m = fromMonth; m <= toMonth; m++) months.push({ year, month: m });
-            } else {
-                for (let m = fromMonth; m <= 12; m++) months.push({ year, month: m });
-                for (let m = 1; m <= toMonth; m++) months.push({ year: year + 1, month: m });
+            let cy = fromYear, cm = fromMonth;
+            while (cy < toYear || (cy === toYear && cm <= toMonth)) {
+                months.push({ year: cy, month: cm });
+                cm++;
+                if (cm > 12) { cm = 1; cy++; }
             }
 
             let runningTotal = 0;
