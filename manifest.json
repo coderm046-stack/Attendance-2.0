@@ -1,6 +1,6 @@
 {
-  "name": "Student Attendance Tracker V1.0",
-  "short_name": "SAT V1.0",
+  "name": "Student Attendance Tracker V2.0",
+  "short_name": "SAT V2.0",
   "description": "Track and manage student attendance efficiently",
   "start_url": "./index.html",
   "display": "standalone",
