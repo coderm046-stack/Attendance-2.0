@@ -1182,6 +1182,12 @@
                 <div id="student-manager-list" style="max-height:260px; overflow-y:auto; border-radius:10px; border:1px solid rgba(255,255,255,0.08);">
                     <!-- filled by renderStudentManagerList() -->
                 </div>
+                <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                    <button onclick="autoRenumberStudents()" style="padding:10px 18px; background:linear-gradient(135deg,#f59e0b,#d97706); color:white; border:none; border-radius:10px; font-weight:700; font-size:14px; cursor:pointer; display:flex; align-items:center; gap:7px;">
+                        🔢 Auto-Renumber Students
+                    </button>
+                    <span style="font-size:12px; color:var(--text-secondary); flex:1;">Re-sequences roll numbers 1, 2, 3… after deletions. Attendance history stays intact.</span>
+                </div>
                 <p style="margin-top:10px; font-size:12px; color:var(--text-secondary);">
                     💾 Students saved to IndexedDB (persists in this browser). Upload Excel to bulk-import, or add individually above.
                 </p>
@@ -1320,37 +1326,92 @@
         async function cloudClearDay() {}
         async function syncFromCloud() {}
 
-        // Initialize Dexie Database
+        // ═══════════════════════════════════════════════════════════════
+        // DATABASE SETUP — v5 uses stable studentId (not rollNo) for attendance
+        // This means roll number changes NEVER corrupt historical data
+        // ═══════════════════════════════════════════════════════════════
         const db = new Dexie('AttendanceDB');
-        db.version(2).stores({
+
+        // v1-v4: legacy schemas kept for upgrade chain
+        db.version(1).stores({ students: '++id, rollNo, name, gender', attendance: '++id, date, rollNo, status, remark', settings: 'key, value' });
+        db.version(2).stores({ students: '++id, rollNo, name, gender', attendance: '++id, date, rollNo, status, remark', settings: 'key, value' });
+        db.version(3).stores({ students: '++id, rollNo, name, gender', attendance: '++id, date, rollNo, status, remark', settings: 'key, value', holidays: '++id, date, name' });
+        db.version(4).stores({ students: '++id, rollNo, name, gender', attendance: '++id, date, rollNo, status, remark', settings: 'key, value', holidays: '++id, date, name, groupId' });
+
+        // v5: CRITICAL CHANGE — attendance now keyed by studentId (Dexie internal id)
+        //     Compound index [date+studentId] gives O(log n) lookups instead of O(n)
+        //     rollNo changes no longer affect historical attendance data
+        db.version(5).stores({
             students: '++id, rollNo, name, gender',
-            attendance: '++id, date, rollNo, status, remark',
-            settings: 'key, value'
-        });
-        db.version(3).stores({
-            students: '++id, rollNo, name, gender',
-            attendance: '++id, date, rollNo, status, remark',
-            settings: 'key, value',
-            holidays: '++id, date, name'
-        });
-        db.version(4).stores({
-            students: '++id, rollNo, name, gender',
-            attendance: '++id, date, rollNo, status, remark',
+            attendance: '++id, [date+studentId], date, studentId, status, remark',
             settings: 'key, value',
             holidays: '++id, date, name, groupId'
+        }).upgrade(async tx => {
+            // Migrate old rollNo-based records to studentId-based
+            const students = await tx.table('students').toArray();
+            const rollNoToId = {};
+            students.forEach(s => { rollNoToId[s.rollNo] = s.id; });
+
+            const records = await tx.table('attendance').toArray();
+            for (const record of records) {
+                if (record.rollNo !== undefined && record.studentId === undefined) {
+                    const sId = rollNoToId[record.rollNo];
+                    if (sId !== undefined) {
+                        await tx.table('attendance').update(record.id, { studentId: sId });
+                    } else {
+                        // No matching student — delete orphaned record
+                        await tx.table('attendance').delete(record.id);
+                    }
+                }
+            }
         });
 
+        // ═══════════════════════════════════════════════════════════════
+        // FAST BATCH QUERY HELPERS
+        // Fetch an entire month's attendance in ONE query → Map for O(1) lookups
+        // This is the "10x faster" improvement — no more N×Days individual queries
+        // ═══════════════════════════════════════════════════════════════
+        async function fetchMonthAttendanceMap(year, month) {
+            const from = `${year}-${String(month).padStart(2,'0')}-01`;
+            const to   = `${year}-${String(month).padStart(2,'0')}-31`;
+            const records = await db.attendance.where('date').between(from, to, true, true).toArray();
+            const map = new Map();
+            records.forEach(r => map.set(`${r.date}_${r.studentId}`, r));
+            return map;
+        }
+
+        async function fetchDayAttendanceMap(dateStr) {
+            const records = await db.attendance.where('date').equals(dateStr).toArray();
+            const map = new Map();
+            records.forEach(r => map.set(r.studentId, r));
+            return map;
+        }
+
+        // Single-cell read/write using compound index (very fast)
+        async function getAttendance(dateStr, studentId) {
+            return await db.attendance.where('[date+studentId]').equals([dateStr, studentId]).first();
+        }
+        async function deleteAttendanceRecord(dateStr, studentId) {
+            await db.attendance.where('[date+studentId]').equals([dateStr, studentId]).delete();
+        }
+        async function setAttendance(dateStr, studentId, status, remark) {
+            await deleteAttendanceRecord(dateStr, studentId);
+            if (status || remark) {
+                await db.attendance.add({ date: dateStr, studentId, status: status || '', remark: remark || '' });
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // APP STATE & INIT
+        // ═══════════════════════════════════════════════════════════════
         let deferredPrompt;
         let currentDate = new Date().toISOString().split('T')[0];
         let currentMonth = new Date().toISOString().substring(0, 7);
-        let lastScrollPosition = 0;
 
-        // Initialize
         document.addEventListener('DOMContentLoaded', async function() {
             document.getElementById('daily-date').value = currentDate;
             document.getElementById('attendance-month').value = currentMonth;
-            
-            // Load theme first
+
             const savedTheme = localStorage.getItem('theme') || 'dark';
             if (savedTheme === 'light') {
                 document.documentElement.setAttribute('data-theme', 'light');
@@ -1358,35 +1419,27 @@
                 document.getElementById('daily-theme-icon').className = 'fas fa-sun';
             }
 
-            // Restore saved class/section
-            const savedClass = localStorage.getItem('selectedClass') || '';
+            const savedClass   = localStorage.getItem('selectedClass') || '';
             const savedSection = localStorage.getItem('selectedSection') || '';
-            document.getElementById('class-select').value = savedClass;
+            document.getElementById('class-select').value   = savedClass;
             document.getElementById('section-select').value = savedSection;
 
-            // Populate summary year dropdowns (2015 – 2040)
+            // Populate summary year dropdowns
             const fromYearSel = document.getElementById('summary-from-year');
             const toYearSel   = document.getElementById('summary-to-year');
             const thisYear = new Date().getFullYear();
             for (let y = 2015; y <= 2040; y++) {
-                const o1 = document.createElement('option');
-                o1.value = y; o1.textContent = y;
-                if (y === thisYear) o1.selected = true;
-                fromYearSel.appendChild(o1);
-
-                const o2 = document.createElement('option');
-                o2.value = y; o2.textContent = y;
-                if (y === thisYear) o2.selected = true;
-                toYearSel.appendChild(o2);
+                const o1 = document.createElement('option'); o1.value = y; o1.textContent = y; if (y === thisYear) o1.selected = true; fromYearSel.appendChild(o1);
+                const o2 = document.createElement('option'); o2.value = y; o2.textContent = y; if (y === thisYear) o2.selected = true; toYearSel.appendChild(o2);
             }
             document.getElementById('summary-from-month').value = '6';
-            document.getElementById('summary-to-month').value = String(new Date().getMonth() + 1);
+            document.getElementById('summary-to-month').value   = String(new Date().getMonth() + 1);
 
             loadDailyAttendance();
         });
 
         function saveClassSection() {
-            localStorage.setItem('selectedClass', document.getElementById('class-select').value);
+            localStorage.setItem('selectedClass',   document.getElementById('class-select').value);
             localStorage.setItem('selectedSection', document.getElementById('section-select').value);
         }
 
@@ -1394,144 +1447,90 @@
             const cls = document.getElementById('class-select').value;
             const sec = document.getElementById('section-select').value;
             if (!cls && !sec) return '';
-            let title = '';
-            if (cls) title += `Class ${cls}`;
+            let title = cls ? `Class ${cls}` : '';
             if (sec) title += (title ? ' - ' : '') + `Section ${sec}`;
             return title;
         }
 
         // PWA Install
         window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            deferredPrompt = e;
+            e.preventDefault(); deferredPrompt = e;
             document.getElementById('install-btn').style.display = 'inline-flex';
         });
-
         document.getElementById('install-btn').addEventListener('click', async () => {
-            if (deferredPrompt) {
-                deferredPrompt.prompt();
-                const { outcome } = await deferredPrompt.userChoice;
-                deferredPrompt = null;
-                document.getElementById('install-btn').style.display = 'none';
-            }
+            if (deferredPrompt) { deferredPrompt.prompt(); const { outcome } = await deferredPrompt.userChoice; deferredPrompt = null; document.getElementById('install-btn').style.display = 'none'; }
         });
 
-        // Service Worker Registration
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('sw.js').catch(() => {
-                    const swCode = `
-                        const CACHE_NAME = 'attendance-v1';
-                        self.addEventListener('install', event => {
-                            self.skipWaiting();
-                        });
-                        self.addEventListener('fetch', event => {
-                            event.respondWith(
-                                caches.match(event.request)
-                                    .then(response => response || fetch(event.request))
-                            );
-                        });
-                    `;
-                    const blob = new Blob([swCode], { type: 'application/javascript' });
-                    const swUrl = URL.createObjectURL(blob);
-                    navigator.serviceWorker.register(swUrl);
+                    const swCode = `const CACHE_NAME='attendance-v1';self.addEventListener('install',e=>{self.skipWaiting();});self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request)));});`;
+                    navigator.serviceWorker.register(URL.createObjectURL(new Blob([swCode],{type:'application/javascript'})));
                 });
             });
         }
 
         function toggleTheme() {
-            const currentTheme = document.documentElement.getAttribute('data-theme');
-            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+            const newTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
             document.documentElement.setAttribute('data-theme', newTheme);
-            document.getElementById('theme-icon').className = newTheme === 'light' ? 'fas fa-sun' : 'fas fa-moon';
+            document.getElementById('theme-icon').className       = newTheme === 'light' ? 'fas fa-sun' : 'fas fa-moon';
             document.getElementById('daily-theme-icon').className = newTheme === 'light' ? 'fas fa-sun' : 'fas fa-moon';
             localStorage.setItem('theme', newTheme);
         }
 
         function switchTab(tabName) {
-            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
-            
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
             document.getElementById('tab-' + tabName).classList.add('active');
             event.currentTarget.classList.add('active');
-
-            // Show/hide theme toggle based on tab
-            if (tabName === 'daily') {
-                document.getElementById('main-theme-toggle').style.display = 'none';
-                loadDailyAttendance();
-            } else {
-                document.getElementById('main-theme-toggle').style.display = 'flex';
-                if (tabName === 'monthly') {
-                    loadMonthlyAttendance();
-                }
-                if (tabName === 'setup') {
-                    renderStudentManagerList();
-                }
-                if (tabName === 'summary') {
-                    loadYearlySummary();
-                }
-            }
+            document.getElementById('main-theme-toggle').style.display = tabName === 'daily' ? 'none' : 'flex';
+            if (tabName === 'daily')   loadDailyAttendance();
+            if (tabName === 'monthly') loadMonthlyAttendance();
+            if (tabName === 'setup')   renderStudentManagerList();
+            if (tabName === 'summary') loadYearlySummary();
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // EXCEL UPLOAD
+        // ═══════════════════════════════════════════════════════════════
         async function handleExcelUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
+            const file = event.target.files[0]; if (!file) return;
             const reader = new FileReader();
             reader.onload = async function(e) {
                 try {
                     const data = new Uint8Array(e.target.result);
-                    const workbook = XLSX.read(data, { type: 'array' });
-                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                    const jsonData = XLSX.utils.sheet_to_json(firstSheet);
-
-                    if (jsonData.length === 0) {
-                        alert('No data found in file!');
-                        return;
-                    }
-
+                    const wb = XLSX.read(data, { type: 'array' });
+                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(ws);
+                    if (!jsonData.length) { alert('No data found in file!'); return; }
                     await db.students.clear();
-
                     let imported = 0;
                     for (let row of jsonData) {
                         const rollNo = row['Roll No'] || row['RollNo'] || row['rollNo'] || row['Roll no'] || row['ROLL NO'];
-                        const name = row['Student Name'] || row['Name'] || row['name'] || row['StudentName'] || row['STUDENT NAME'];
+                        const name   = row['Student Name'] || row['Name'] || row['name'] || row['StudentName'] || row['STUDENT NAME'];
                         const gender = row['Gender'] || row['gender'] || row['GENDER'] || row['Sex'];
-
-                        if (rollNo && name) {
-                            await db.students.add({
-                                rollNo: String(rollNo),
-                                name: String(name),
-                                gender: String(gender || 'Male')
-                            });
-                            imported++;
-                        }
+                        if (rollNo && name) { await db.students.add({ rollNo: String(rollNo), name: String(name), gender: String(gender || 'Male') }); imported++; }
                     }
-
                     alert(`Successfully imported ${imported} students!\n💾 Saved to your device.`);
                     loadDailyAttendance();
-                } catch (error) {
-                    alert('Error reading file: ' + error.message);
-                }
+                } catch (error) { alert('Error reading file: ' + error.message); }
             };
             reader.readAsArrayBuffer(file);
         }
 
         function getSortedStudents(students) {
-            return students.sort((a, b) => {
-                const numA = parseInt(a.rollNo) || 0;
-                const numB = parseInt(b.rollNo) || 0;
-                return numA - numB;
-            });
+            return students.sort((a, b) => { const nA = parseInt(a.rollNo)||0; const nB = parseInt(b.rollNo)||0; return nA !== nB ? nA - nB : a.rollNo.localeCompare(b.rollNo); });
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // DAILY ATTENDANCE — uses batch fetch + studentId
+        // ═══════════════════════════════════════════════════════════════
         async function loadDailyAttendance() {
             currentDate = document.getElementById('daily-date').value;
-            const students = await db.students.toArray();
-            const sortedStudents = getSortedStudents(students);
+            const students = getSortedStudents(await db.students.toArray());
             const listContainer = document.getElementById('student-list');
 
-            // ── Holiday check ──
+            // Holiday / Sunday check
             const holiday = await db.holidays.where('date').equals(currentDate).first();
             const [cy, cm, cd] = currentDate.split('-').map(Number);
             const isSunday = new Date(cy, cm - 1, cd).getDay() === 0;
@@ -1539,42 +1538,28 @@
 
             if (holiday || (isSunday && autoExcSun)) {
                 const holidayName = holiday ? holiday.name : 'Sunday';
-                listContainer.innerHTML = `
-                    <div class="holiday-banner">
-                        <div class="hb-icon">🏖️</div>
-                        <div class="hb-title">Holiday — No Attendance</div>
-                        <div class="hb-name">${holidayName}</div>
-                        <div class="hb-sub">${currentDate} · This day is marked as a holiday.<br>Attendance marking is disabled.</div>
-                    </div>`;
-                updateDailyStats(0, 0, 0, 0);
-                return;
+                listContainer.innerHTML = `<div class="holiday-banner"><div class="hb-icon">🏖️</div><div class="hb-title">Holiday — No Attendance</div><div class="hb-name">${holidayName}</div><div class="hb-sub">${currentDate} · This day is marked as a holiday.<br>Attendance marking is disabled.</div></div>`;
+                updateDailyStats(0, 0, 0, 0); return;
             }
 
-            if (sortedStudents.length === 0) {
-                listContainer.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-users"></i>
-                        <h3 style="margin-top: 12px; color: #666;">No Students</h3>
-                        <p style="margin-top: 8px; font-size: 14px;">Upload data in Setup tab</p>
-                    </div>
-                `;
-                updateDailyStats(0, 0, 0, 0);
-                return;
+            if (!students.length) {
+                listContainer.innerHTML = `<div class="empty-state"><i class="fas fa-users"></i><h3 style="margin-top:12px;color:#666;">No Students</h3><p style="margin-top:8px;font-size:14px;">Upload data in Setup tab</p></div>`;
+                updateDailyStats(0, 0, 0, 0); return;
             }
+
+            // ✅ BATCH FETCH — one query for the entire day
+            const dayMap = await fetchDayAttendanceMap(currentDate);
 
             listContainer.innerHTML = '';
-            let boysPresent = 0, girlsPresent = 0;
-            let boysAbsent = 0, girlsAbsent = 0;
+            let boysP = 0, girlsP = 0, boysA = 0, girlsA = 0;
 
-            for (let student of sortedStudents) {
-                const attendance = await db.attendance
-                    .where({ date: currentDate, rollNo: student.rollNo })
-                    .first();
-
+            for (let student of students) {
+                const attendance = dayMap.get(student.id);
                 const card = document.createElement('div');
                 const genderClass = student.gender.toLowerCase().startsWith('f') ? 'female' : 'male';
                 card.className = `daily-student-card ${genderClass}`;
-                card.dataset.rollno = student.rollNo;
+                card.dataset.studentid = student.id;
+
                 card.innerHTML = `
                     <div class="daily-student-header">
                         <div class="daily-student-info">
@@ -1582,544 +1567,437 @@
                             <p>Roll: ${student.rollNo}</p>
                         </div>
                         <div class="daily-attendance-btns">
-                            <button class="present-btn ${attendance?.status === 'present' ? 'active' : ''}" 
-                                    onclick="markDailyAttendance('${student.rollNo}', 'present')">
-                                P
-                            </button>
+                            <button class="present-btn ${attendance?.status === 'present' ? 'active' : ''}"
+                                    onclick="markDailyAttendance(${student.id}, 'present')">P</button>
                             <button class="absent-btn ${attendance?.status === 'absent' ? 'active' : ''}"
-                                    onclick="markDailyAttendance('${student.rollNo}', 'absent')">
-                                A
-                            </button>
+                                    onclick="markDailyAttendance(${student.id}, 'absent')">A</button>
                         </div>
                     </div>
                     <div class="remark-box">
-                        <input type="text" 
-                               placeholder="REMARK" 
-                               value="${attendance?.remark || ''}"
-                               onchange="saveRemark('${student.rollNo}', this.value)"
+                        <input type="text" placeholder="REMARK" value="${attendance?.remark || ''}"
+                               onchange="saveRemark(${student.id}, this.value)"
                                onclick="event.stopPropagation()">
-                    </div>
-                `;
+                    </div>`;
                 listContainer.appendChild(card);
 
-                if (attendance?.status === 'present') {
-                    if (student.gender.toLowerCase() === 'male') boysPresent++;
-                    else girlsPresent++;
-                } else if (attendance?.status === 'absent') {
-                    if (student.gender.toLowerCase() === 'male') boysAbsent++;
-                    else girlsAbsent++;
-                }
+                if (attendance?.status === 'present') { genderClass === 'male' ? boysP++ : girlsP++; }
+                else if (attendance?.status === 'absent') { genderClass === 'male' ? boysA++ : girlsA++; }
             }
-
-            updateDailyStats(boysPresent, girlsPresent, boysAbsent, girlsAbsent);
+            updateDailyStats(boysP, girlsP, boysA, girlsA);
         }
 
         function updateDailyStatsFromDOM() {
-            // Count stats by reading DOM state
             let boysP = 0, girlsP = 0, boysA = 0, girlsA = 0;
             document.querySelectorAll('.daily-student-card').forEach(card => {
-                const pActive = card.querySelector('.present-btn')?.classList.contains('active');
-                const aActive = card.querySelector('.absent-btn')?.classList.contains('active');
-                const isMale = card.classList.contains('male');
-                if (pActive) { isMale ? boysP++ : girlsP++; }
-                if (aActive) { isMale ? boysA++ : girlsA++; }
+                const pA = card.querySelector('.present-btn')?.classList.contains('active');
+                const aA = card.querySelector('.absent-btn')?.classList.contains('active');
+                const male = card.classList.contains('male');
+                if (pA) { male ? boysP++ : girlsP++; }
+                if (aA) { male ? boysA++ : girlsA++; }
             });
             updateDailyStats(boysP, girlsP, boysA, girlsA);
         }
 
-        function updateDailyStats(boysP, girlsP, boysA, girlsA) {
-            document.getElementById('boys-present').textContent = boysP;
-            document.getElementById('girls-present').textContent = girlsP;
-            document.getElementById('combine-present').textContent = boysP + girlsP;
-            document.getElementById('boys-absent').textContent = boysA;
-            document.getElementById('girls-absent').textContent = girlsA;
-            document.getElementById('combine-absent').textContent = boysA + girlsA;
+        function updateDailyStats(bP, gP, bA, gA) {
+            document.getElementById('boys-present').textContent    = bP;
+            document.getElementById('girls-present').textContent   = gP;
+            document.getElementById('combine-present').textContent = bP + gP;
+            document.getElementById('boys-absent').textContent     = bA;
+            document.getElementById('girls-absent').textContent    = gA;
+            document.getElementById('combine-absent').textContent  = bA + gA;
         }
 
-        async function markDailyAttendance(rollNo, status) {
-            // Block if holiday
+        async function markDailyAttendance(studentId, status) {
+            // Block on holiday / Sunday
             const holiday = await db.holidays.where('date').equals(currentDate).first();
             const [cy, cm, cd] = currentDate.split('-').map(Number);
-            const isSun = new Date(cy, cm - 1, cd).getDay() === 0;
-            const autoExcSun = document.getElementById('auto-sundays')?.checked !== false;
-            if (holiday || (isSun && autoExcSun)) return;
-            const existing = await db.attendance.where({ date: currentDate, rollNo: rollNo }).first();
-            await db.attendance.where({ date: currentDate, rollNo: rollNo }).delete();
-            
-            const record = {
-                date: currentDate,
-                rollNo: rollNo,
-                status: status,
-                remark: existing?.remark || ''
-            };
-            await db.attendance.add(record);
+            if (holiday || (new Date(cy, cm-1, cd).getDay() === 0 && document.getElementById('auto-sundays')?.checked !== false)) return;
 
-            
-            // Update UI in-place to avoid scroll reset
-            const card = document.querySelector(`[data-rollno="${rollNo}"]`);
+            const existing = await getAttendance(currentDate, studentId);
+            await setAttendance(currentDate, studentId, status, existing?.remark || '');
+
+            // In-place DOM update — no scroll reset
+            const card = document.querySelector(`[data-studentid="${studentId}"]`);
             if (card) {
-                const pBtn = card.querySelector('.present-btn');
-                const aBtn = card.querySelector('.absent-btn');
-                pBtn.classList.toggle('active', status === 'present');
-                aBtn.classList.toggle('active', status === 'absent');
+                card.querySelector('.present-btn').classList.toggle('active', status === 'present');
+                card.querySelector('.absent-btn').classList.toggle('active', status === 'absent');
             }
-            
-            // Just update stats without re-rendering
             updateDailyStatsFromDOM();
         }
 
-        async function saveRemark(rollNo, remark) {
-            const existing = await db.attendance.where({ date: currentDate, rollNo: rollNo }).first();
-            let record;
-            if (existing) {
-                await db.attendance.where({ date: currentDate, rollNo: rollNo }).delete();
-                record = { date: currentDate, rollNo: rollNo, status: existing.status, remark: remark };
-                await db.attendance.add(record);
-            } else {
-                record = { date: currentDate, rollNo: rollNo, status: '', remark: remark };
-                await db.attendance.add(record);
-            }
+        async function saveRemark(studentId, remark) {
+            const existing = await getAttendance(currentDate, studentId);
+            await setAttendance(currentDate, studentId, existing?.status || '', remark);
         }
 
         async function markAllToday(status) {
-            // Block if holiday
             const holiday = await db.holidays.where('date').equals(currentDate).first();
             const [cy, cm, cd] = currentDate.split('-').map(Number);
-            const isSun = new Date(cy, cm - 1, cd).getDay() === 0;
-            const autoExcSun = document.getElementById('auto-sundays')?.checked !== false;
-            if (holiday || (isSun && autoExcSun)) { alert('This day is a holiday. Attendance marking is disabled.'); return; }
+            if (holiday || (new Date(cy, cm-1, cd).getDay() === 0 && document.getElementById('auto-sundays')?.checked !== false)) {
+                alert('This day is a holiday. Attendance marking is disabled.'); return;
+            }
             const students = await db.students.toArray();
-            const records = [];
-            
             for (let student of students) {
-                const existing = await db.attendance.where({ date: currentDate, rollNo: student.rollNo }).first();
-                await db.attendance.where({ date: currentDate, rollNo: student.rollNo }).delete();
-                const record = {
-                    date: currentDate,
-                    rollNo: student.rollNo,
-                    status: status,
-                    remark: existing?.remark || ''
-                };
-                await db.attendance.add(record);
-                records.push(record);
-                // Update DOM in-place
-                const card = document.querySelector(`[data-rollno="${student.rollNo}"]`);
+                const existing = await getAttendance(currentDate, student.id);
+                await setAttendance(currentDate, student.id, status, existing?.remark || '');
+                const card = document.querySelector(`[data-studentid="${student.id}"]`);
                 if (card) {
                     card.querySelector('.present-btn').classList.toggle('active', status === 'present');
                     card.querySelector('.absent-btn').classList.toggle('active', status === 'absent');
                 }
             }
-
-            // Update stats without re-rendering
             updateDailyStatsFromDOM();
         }
 
         async function clearAllToday() {
             if (!confirm('Clear all attendance for today (' + currentDate + ')? This cannot be undone.')) return;
             const students = await db.students.toArray();
-            for (let student of students) {
-                await db.attendance.where({ date: currentDate, rollNo: student.rollNo }).delete();
-            }
-            // Clear from cloud too
+            for (let student of students) await deleteAttendanceRecord(currentDate, student.id);
             loadDailyAttendance();
         }
 
-        // Helper: count present days for a student in the previous month from actual DB data
-        async function getPrevMonthPresent(rollNo, year, month) {
-            // Go back one month
-            let prevYear = year;
-            let prevMonth = month - 1;
-            if (prevMonth === 0) { prevMonth = 12; prevYear = year - 1; }
-            const daysInPrevMonth = new Date(prevYear, prevMonth, 0).getDate();
-            let count = 0;
-            for (let day = 1; day <= daysInPrevMonth; day++) {
-                const dateStr = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                const att = await db.attendance.where({ date: dateStr, rollNo: rollNo }).first();
-                if (att?.status === 'present') count++;
+        // ═══════════════════════════════════════════════════════════════
+        // PREVIOUS MONTH PRESENT — looks up by studentId, so survives roll renumber
+        // ═══════════════════════════════════════════════════════════════
+        async function getPrevMonthPresent(studentId, year, month, prevMonthMap) {
+            // If caller passes a pre-fetched map, use it (fast path)
+            if (prevMonthMap) {
+                let count = 0;
+                prevMonthMap.forEach((rec, key) => {
+                    if (key.endsWith(`_${studentId}`) && rec.status === 'present') count++;
+                });
+                return count;
             }
-            return count;
+            // Fallback: direct query
+            let pY = year, pM = month - 1;
+            if (pM === 0) { pM = 12; pY--; }
+            const from = `${pY}-${String(pM).padStart(2,'0')}-01`;
+            const to   = `${pY}-${String(pM).padStart(2,'0')}-31`;
+            const records = await db.attendance.where('date').between(from, to, true, true)
+                .filter(r => r.studentId === studentId && r.status === 'present').count();
+            return records;
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // MONTHLY ATTENDANCE — batch query, 10× faster
+        // ═══════════════════════════════════════════════════════════════
         async function loadMonthlyAttendance() {
             currentMonth = document.getElementById('attendance-month').value;
             const [year, month] = currentMonth.split('-').map(Number);
             const daysInMonth = new Date(year, month, 0).getDate();
 
-            // Refresh holiday manager UI for new month
             await renderHolidayChips();
             await populateDateDropdown();
 
-            const students = await db.students.toArray();
-            const sortedStudents = getSortedStudents(students);
-            
-            if (sortedStudents.length === 0) {
-                document.getElementById('table-body').innerHTML = `
-                    <tr>
-                        <td colspan="${daysInMonth + 5}" style="padding: 40px; text-align: center; color: var(--text-secondary);">
-                            <i class="fas fa-users" style="font-size: 48px; margin-bottom: 16px; display: block; opacity: 0.5;"></i>
-                            No students found. Please upload an Excel file in the Setup tab.
-                        </td>
-                    </tr>
-                `;
+            const students = getSortedStudents(await db.students.toArray());
+            if (!students.length) {
+                document.getElementById('table-body').innerHTML = `<tr><td colspan="${daysInMonth+5}" style="padding:40px;text-align:center;color:var(--text-secondary);"><i class="fas fa-users" style="font-size:48px;margin-bottom:16px;display:block;opacity:0.5;"></i>No students found. Please upload an Excel file in the Setup tab.</td></tr>`;
                 return;
             }
 
-            // Build table header with holiday/Sunday highlighting
-            const holidaysList = await getHolidaysForMonth(year, month);
-            const holidayDates = new Set(holidaysList.map(h => h.date));
-            const sundayDatesSet = new Set(getSundayDates(year, month));
-            const autoExcSun = document.getElementById('auto-sundays')?.checked !== false;
+            // ✅ BATCH FETCH — current month + previous month in 2 queries
+            const thisMonthMap = await fetchMonthAttendanceMap(year, month);
+            let pY = year, pM = month - 1;
+            if (pM === 0) { pM = 12; pY--; }
+            const prevMonthMap = await fetchMonthAttendanceMap(pY, pM);
 
+            const holidaysList  = await getHolidaysForMonth(year, month);
+            const holidayDates  = new Set(holidaysList.map(h => h.date));
+            const sundayDatesSet = new Set(getSundayDates(year, month));
+            const autoExcSun    = document.getElementById('auto-sundays')?.checked !== false;
+
+            // Build header
             let headerHTML = '<th>Roll No<br>Student Name<br>Gender</th>';
             for (let day = 1; day <= daysInMonth; day++) {
                 const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
                 const isSun = sundayDatesSet.has(dateStr) && autoExcSun;
                 const isHol = holidayDates.has(dateStr);
-                let thStyle = '';
-                let dayLabel = `${day}`;
-                if (isSun) { thStyle = 'background:rgba(239,68,68,0.25); color:#f87171;'; dayLabel = `${day}<br><span style="font-size:9px;">☀️Sun</span>`; }
-                else if (isHol) { thStyle = 'background:rgba(245,158,11,0.25); color:#fbbf24;'; dayLabel = `${day}<br><span style="font-size:9px;">🏖️Hol</span>`; }
+                let thStyle = '', dayLabel = `${day}`;
+                if (isSun)      { thStyle = 'background:rgba(239,68,68,0.25);color:#f87171;'; dayLabel = `${day}<br><span style="font-size:9px;">☀️Sun</span>`; }
+                else if (isHol) { thStyle = 'background:rgba(245,158,11,0.25);color:#fbbf24;'; dayLabel = `${day}<br><span style="font-size:9px;">🏖️Hol</span>`; }
                 headerHTML += `<th style="${thStyle}">${dayLabel}</th>`;
             }
-            headerHTML += '<th>Total<br>Present</th>';
-            headerHTML += '<th>Total<br>Absent</th>';
-            headerHTML += '<th>Previous<br>Month<br>Present</th>';
-            headerHTML += '<th>Combine<br>Present</th>';
+            headerHTML += '<th>Total<br>Present</th><th>Total<br>Absent</th><th>Previous<br>Month<br>Present</th><th>Combine<br>Present</th>';
             document.getElementById('table-header').innerHTML = headerHTML;
 
-            // Build table body - previous month calculated per student automatically
+            // Build rows
             let bodyHTML = '';
-
-            for (let student of sortedStudents) {
-                // Auto-calculate previous month present from actual DB data
-                const prevMonthPresent = await getPrevMonthPresent(student.rollNo, year, month);
+            for (let student of students) {
+                // Previous month using pre-fetched map — O(n) scan but only once total
+                let prevMonthPresent = 0;
+                prevMonthMap.forEach((rec, key) => {
+                    if (key.endsWith(`_${student.id}`) && rec.status === 'present') prevMonthPresent++;
+                });
 
                 let rowHTML = `<td class="student-name-cell ${student.gender.toLowerCase()}">
-                    <strong>${student.rollNo}</strong><br>
-                    ${student.name}<br>
-                    <span style="font-size: 11px; color: var(--text-secondary);">${student.gender}</span>
-                </td>`;
+                    <strong>${student.rollNo}</strong><br>${student.name}<br>
+                    <span style="font-size:11px;color:var(--text-secondary);">${student.gender}</span></td>`;
 
-                let totalPresent = 0;
-                let totalAbsent = 0;
-
+                let totalPresent = 0, totalAbsent = 0;
                 for (let day = 1; day <= daysInMonth; day++) {
-                    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                    const attendance = await db.attendance
-                        .where({ date: dateStr, rollNo: student.rollNo })
-                        .first();
-
-                    const status = attendance ? attendance.status : '';
-                    const cellClass = status === 'present' ? 'present' : status === 'absent' ? 'absent' : '';
-                    const displayText = status === 'present' ? 'P' : status === 'absent' ? 'A' : '-';
-                    
+                    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                    const rec = thisMonthMap.get(`${dateStr}_${student.id}`);
+                    const status = rec ? rec.status : '';
                     if (status === 'present') totalPresent++;
-                    if (status === 'absent') totalAbsent++;
-
-                    rowHTML += `<td class="day-cell ${cellClass}" onclick="toggleMonthlyAttendance('${dateStr}', '${student.rollNo}')">${displayText}</td>`;
+                    if (status === 'absent')  totalAbsent++;
+                    const cellClass   = status === 'present' ? 'present' : status === 'absent' ? 'absent' : '';
+                    const displayText = status === 'present' ? 'P' : status === 'absent' ? 'A' : '-';
+                    rowHTML += `<td class="day-cell ${cellClass}" onclick="toggleMonthlyAttendance('${dateStr}', ${student.id})">${displayText}</td>`;
                 }
-
                 const combinePresent = totalPresent + prevMonthPresent;
-
-                rowHTML += `<td style="font-weight: 700; color: var(--accent-green);">${totalPresent}</td>`;
-                rowHTML += `<td style="font-weight: 700; color: var(--accent-red);">${totalAbsent}</td>`;
-                rowHTML += `<td style="font-weight: 600; color: var(--accent-blue);" title="Auto-calculated from previous month data">${prevMonthPresent}</td>`;
-                rowHTML += `<td style="font-weight: 700; background: rgba(59, 130, 246, 0.1);">${combinePresent}</td>`;
-
+                rowHTML += `<td style="font-weight:700;color:var(--accent-green);">${totalPresent}</td>`;
+                rowHTML += `<td style="font-weight:700;color:var(--accent-red);">${totalAbsent}</td>`;
+                rowHTML += `<td style="font-weight:600;color:var(--accent-blue);" title="Auto-calculated from previous month data (by student ID — survives roll renumber)">${prevMonthPresent}</td>`;
+                rowHTML += `<td style="font-weight:700;background:rgba(59,130,246,0.1);">${combinePresent}</td>`;
                 bodyHTML += `<tr>${rowHTML}</tr>`;
             }
-
             document.getElementById('table-body').innerHTML = bodyHTML;
             calculateSummary();
         }
 
-        async function toggleMonthlyAttendance(date, rollNo) {
-            const existing = await db.attendance.where({ date: date, rollNo: rollNo }).first();
-            
-            await db.attendance.where({ date: date, rollNo: rollNo }).delete();
-            
+        async function toggleMonthlyAttendance(date, studentId) {
+            const existing = await getAttendance(date, studentId);
             let newStatus = '';
-            if (!existing || existing.status === '') {
-                newStatus = 'present';
-            } else if (existing.status === 'present') {
-                newStatus = 'absent';
-            } else {
-                newStatus = '';
-            }
-
-            if (newStatus !== '') {
-                const record = { date: date, rollNo: rollNo, status: newStatus, remark: existing?.remark || '' };
-                await db.attendance.add(record);
-            } else {
-            }
-
+            if (!existing || existing.status === '') newStatus = 'present';
+            else if (existing.status === 'present')  newStatus = 'absent';
+            await setAttendance(date, studentId, newStatus, existing?.remark || '');
             loadMonthlyAttendance();
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // HOLIDAY MANAGER FUNCTIONS
+        // HOLIDAY MANAGER
         // ═══════════════════════════════════════════════════════════════
-
         function getSelectedMonthYear() {
             const val = document.getElementById('attendance-month')?.value || currentMonth;
             const [year, month] = val.split('-').map(Number);
             return { year, month };
         }
-
         function countSundaysInMonth(year, month) {
-            const days = new Date(year, month, 0).getDate();
-            let sundays = 0;
-            for (let d = 1; d <= days; d++) {
-                if (new Date(year, month - 1, d).getDay() === 0) sundays++;
-            }
-            return sundays;
+            const days = new Date(year, month, 0).getDate(); let s = 0;
+            for (let d = 1; d <= days; d++) if (new Date(year, month-1, d).getDay() === 0) s++;
+            return s;
         }
-
         function getSundayDates(year, month) {
-            const days = new Date(year, month, 0).getDate();
-            const sundays = [];
+            const days = new Date(year, month, 0).getDate(); const arr = [];
             for (let d = 1; d <= days; d++) {
-                if (new Date(year, month - 1, d).getDay() === 0) {
-                    sundays.push(`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
-                }
+                if (new Date(year, month-1, d).getDay() === 0)
+                    arr.push(`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
             }
-            return sundays;
+            return arr;
         }
-
         async function populateDateDropdown() {
             const { year, month } = getSelectedMonthYear();
             const days = new Date(year, month, 0).getDate();
-            const select = document.getElementById('holiday-date-select');
-            if (!select) return;
+            const select = document.getElementById('holiday-date-select'); if (!select) return;
             const existing = await db.holidays.toArray();
             const existingDates = new Set(existing.filter(h => h.date.startsWith(`${year}-${String(month).padStart(2,'0')}`)).map(h => h.date));
             const sundays = new Set(getSundayDates(year, month));
-
             select.innerHTML = '<option value="">-- pick a day --</option>';
             const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
             for (let d = 1; d <= days; d++) {
                 const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
                 const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(year, month-1, d).getDay()];
-                const isSun = sundays.has(dateStr);
-                const isHol = existingDates.has(dateStr);
-                if (!isSun && !isHol) {
-                    const opt = document.createElement('option');
-                    opt.value = dateStr;
-                    opt.textContent = `${d} ${months[month-1]} (${dow})`;
-                    select.appendChild(opt);
+                if (!sundays.has(dateStr) && !existingDates.has(dateStr)) {
+                    const opt = document.createElement('option'); opt.value = dateStr;
+                    opt.textContent = `${d} ${months[month-1]} (${dow})`; select.appendChild(opt);
                 }
             }
-
-            // Also populate vacation range dropdowns (all non-Sunday days, allow already-holiday overlap for flexibility)
             const vFrom = document.getElementById('vacation-from-select');
             const vTo   = document.getElementById('vacation-to-select');
             if (vFrom && vTo) {
-                const allDayOpts = '<option value="">-- start day --</option>' +
-                    Array.from({length: days}, (_, i) => {
-                        const d = i + 1;
-                        const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-                        const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(year, month-1, d).getDay()];
-                        return `<option value="${dateStr}">${d} ${months[month-1]} (${dow})</option>`;
-                    }).join('');
-                vFrom.innerHTML = allDayOpts.replace('-- start day --', '-- start day --');
-                vTo.innerHTML   = allDayOpts.replace('-- start day --', '-- end day --');
+                const base = Array.from({length: days}, (_,i) => {
+                    const d = i+1, dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                    const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(year, month-1, d).getDay()];
+                    return `<option value="${dateStr}">${d} ${months[month-1]} (${dow})</option>`;
+                }).join('');
+                vFrom.innerHTML = '<option value="">-- start day --</option>' + base;
+                vTo.innerHTML   = '<option value="">-- end day --</option>'   + base;
             }
         }
-
         async function addHoliday() {
             const dateVal = document.getElementById('holiday-date-select').value;
             const nameVal = document.getElementById('holiday-name-input').value.trim();
-            if (!dateVal) { alert('Please select a date for the holiday.'); return; }
+            if (!dateVal) { alert('Please select a date.'); return; }
             if (!nameVal) { alert('Please enter a holiday name.'); return; }
-
-            const existing = await db.holidays.where('date').equals(dateVal).first();
-            if (existing) { alert('A holiday already exists on this date!'); return; }
-
+            const ex = await db.holidays.where('date').equals(dateVal).first();
+            if (ex) { alert('A holiday already exists on this date!'); return; }
             await db.holidays.add({ date: dateVal, name: nameVal });
             document.getElementById('holiday-name-input').value = '';
-            await renderHolidayChips();
-            await populateDateDropdown();
-            calculateSummary();
+            await renderHolidayChips(); await populateDateDropdown(); calculateSummary();
         }
-
         async function addVacationRange() {
             const fromDate = document.getElementById('vacation-from-select').value;
             const toDate   = document.getElementById('vacation-to-select').value;
             const nameVal  = document.getElementById('vacation-name-input').value.trim();
-            if (!fromDate) { alert('Please select a start date.'); return; }
-            if (!toDate)   { alert('Please select an end date.'); return; }
-            if (!nameVal)  { alert('Please enter a vacation name.'); return; }
-            if (fromDate > toDate) { alert('Start date must be before or same as end date.'); return; }
-
-            // Generate all dates in range
+            if (!fromDate) { alert('Select start date.'); return; }
+            if (!toDate)   { alert('Select end date.'); return; }
+            if (!nameVal)  { alert('Enter vacation name.'); return; }
+            if (fromDate > toDate) { alert('Start must be before end.'); return; }
             const groupId = 'vac_' + Date.now();
-            const start = new Date(fromDate + 'T00:00:00');
-            const end   = new Date(toDate   + 'T00:00:00');
             let added = 0;
-            for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-                const dateStr = d.toISOString().split('T')[0];
-                const existing = await db.holidays.where('date').equals(dateStr).first();
-                if (!existing) {
-                    await db.holidays.add({ date: dateStr, name: nameVal, groupId });
-                    added++;
-                }
+            for (let d = new Date(fromDate+'T00:00:00'); d <= new Date(toDate+'T00:00:00'); d.setDate(d.getDate()+1)) {
+                const ds = d.toISOString().split('T')[0];
+                if (!(await db.holidays.where('date').equals(ds).first())) { await db.holidays.add({ date: ds, name: nameVal, groupId }); added++; }
             }
             document.getElementById('vacation-name-input').value = '';
-            await renderHolidayChips();
-            await populateDateDropdown();
-            calculateSummary();
-            if (added === 0) alert('All dates in this range are already marked as holidays.');
+            await renderHolidayChips(); await populateDateDropdown(); calculateSummary();
+            if (!added) alert('All dates already marked as holidays.');
         }
-
         async function removeHoliday(id, groupId) {
-            if (groupId) {
-                // Remove entire vacation group
-                const all = await db.holidays.where('groupId').equals(groupId).toArray();
-                for (const h of all) await db.holidays.delete(h.id);
-            } else {
-                await db.holidays.delete(id);
-            }
-            await renderHolidayChips();
-            await populateDateDropdown();
-            calculateSummary();
+            if (groupId) { const all = await db.holidays.where('groupId').equals(groupId).toArray(); for (const h of all) await db.holidays.delete(h.id); }
+            else await db.holidays.delete(id);
+            await renderHolidayChips(); await populateDateDropdown(); calculateSummary();
         }
-
         async function renderHolidayChips() {
             const { year, month } = getSelectedMonthYear();
             const prefix = `${year}-${String(month).padStart(2,'0')}`;
             const holidays = (await db.holidays.toArray()).filter(h => h.date.startsWith(prefix));
             holidays.sort((a,b) => a.date.localeCompare(b.date));
-
-            const container = document.getElementById('holiday-chips');
-            if (!container) return;
-
+            const container = document.getElementById('holiday-chips'); if (!container) return;
             const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-            // Group by groupId — vacations shown as range chip; singles shown individually
-            const rendered = new Set();
-            const chips = [];
-
+            const rendered = new Set(); const chips = [];
             for (const h of holidays) {
                 if (rendered.has(h.id)) continue;
-
                 if (h.groupId) {
-                    // Find all in this group that are in the current view (may span across months but show range label)
-                    const groupAll = (await db.holidays.where('groupId').equals(h.groupId).toArray())
-                        .sort((a,b) => a.date.localeCompare(b.date));
+                    const groupAll = (await db.holidays.where('groupId').equals(h.groupId).toArray()).sort((a,b)=>a.date.localeCompare(b.date));
                     groupAll.forEach(x => rendered.add(x.id));
-
-                    const firstDate = new Date(groupAll[0].date + 'T00:00:00');
-                    const lastDate  = new Date(groupAll[groupAll.length - 1].date + 'T00:00:00');
-                    const fLabel = `${firstDate.getDate()} ${months[firstDate.getMonth()]} ${firstDate.getFullYear()}`;
-                    const lLabel = `${lastDate.getDate()} ${months[lastDate.getMonth()]} ${lastDate.getFullYear()}`;
-                    const rangeLabel = fLabel === lLabel ? fLabel : `${fLabel} to ${lLabel}`;
-                    chips.push(`<span style="display:inline-flex; align-items:center; gap:6px; background:rgba(139,92,246,0.15); border:1px solid rgba(139,92,246,0.5); color:var(--text-primary); padding:6px 12px; border-radius:20px; font-size:13px; font-weight:600;">
-                        <span style="font-size:16px;">🏖️</span>${rangeLabel} – ${h.name} <span style="font-size:10px; opacity:0.7;">(${groupAll.length}d)</span>
-                        <button onclick="removeHoliday(${h.id},'${h.groupId}')" style="background:none; border:none; color:#f87171; cursor:pointer; font-size:16px; line-height:1; padding:0 0 0 4px; font-weight:700;">&times;</button>
-                    </span>`);
+                    const f = new Date(groupAll[0].date+'T00:00:00'), l = new Date(groupAll[groupAll.length-1].date+'T00:00:00');
+                    const fL = `${f.getDate()} ${months[f.getMonth()]} ${f.getFullYear()}`, lL = `${l.getDate()} ${months[l.getMonth()]} ${l.getFullYear()}`;
+                    chips.push(`<span style="display:inline-flex;align-items:center;gap:6px;background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.5);color:var(--text-primary);padding:6px 12px;border-radius:20px;font-size:13px;font-weight:600;"><span style="font-size:16px;">🏖️</span>${fL === lL ? fL : `${fL} to ${lL}`} – ${h.name} <span style="font-size:10px;opacity:0.7;">(${groupAll.length}d)</span><button onclick="removeHoliday(${h.id},'${h.groupId}')" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:16px;line-height:1;padding:0 0 0 4px;font-weight:700;">&times;</button></span>`);
                 } else {
                     rendered.add(h.id);
-                    const d = new Date(h.date + 'T00:00:00');
-                    const label = `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()} – ${h.name}`;
-                    chips.push(`<span style="display:inline-flex; align-items:center; gap:6px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); color:var(--text-primary); padding:6px 12px; border-radius:20px; font-size:13px; font-weight:600;">
-                        <span style="font-size:16px;">📅</span>${label}
-                        <button onclick="removeHoliday(${h.id},null)" style="background:none; border:none; color:#f87171; cursor:pointer; font-size:16px; line-height:1; padding:0 0 0 4px; font-weight:700;">&times;</button>
-                    </span>`);
+                    const d = new Date(h.date+'T00:00:00');
+                    chips.push(`<span style="display:inline-flex;align-items:center;gap:6px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.4);color:var(--text-primary);padding:6px 12px;border-radius:20px;font-size:13px;font-weight:600;"><span style="font-size:16px;">📅</span>${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()} – ${h.name}<button onclick="removeHoliday(${h.id},null)" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:16px;line-height:1;padding:0 0 0 4px;font-weight:700;">&times;</button></span>`);
                 }
             }
-
             container.innerHTML = chips.join('');
         }
-
         async function getHolidaysForMonth(year, month) {
             const prefix = `${year}-${String(month).padStart(2,'0')}`;
             return (await db.holidays.toArray()).filter(h => h.date.startsWith(prefix));
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // STUDENT MANAGER FUNCTIONS
+        // STUDENT MANAGER — Add / Edit / Delete / Auto-Renumber
         // ═══════════════════════════════════════════════════════════════
-
         async function addStudentManually() {
             const rollNo = document.getElementById('new-roll').value.trim();
-            const name = document.getElementById('new-name').value.trim();
+            const name   = document.getElementById('new-name').value.trim();
             const gender = document.getElementById('new-gender').value;
-
             if (!rollNo || !name) { alert('Please enter both Roll No and Student Name.'); return; }
-
-            const existing = await db.students.where('rollNo').equals(rollNo).first();
-            if (existing) { alert(`Roll No ${rollNo} already exists!`); return; }
-
+            const ex = await db.students.where('rollNo').equals(rollNo).first();
+            if (ex) { alert(`Roll No ${rollNo} already exists!`); return; }
             await db.students.add({ rollNo, name, gender });
-
-            // Sync to cloud
-            const allStudents = await db.students.toArray();
-
             document.getElementById('new-roll').value = '';
             document.getElementById('new-name').value = '';
+            renderStudentManagerList();
+            loadDailyAttendance();
+        }
 
+        // Inline edit: turn a row into an edit form
+        function startEditStudent(id, rollNo, name, gender) {
+            const row = document.getElementById(`student-row-${id}`);
+            if (!row) return;
+            row.innerHTML = `
+                <div style="display:flex;gap:8px;align-items:center;padding:10px 14px;background:rgba(59,130,246,0.12);border-left:4px solid #3b82f6;flex-wrap:wrap;">
+                    <input id="edit-roll-${id}" value="${rollNo.replace(/"/g,'&quot;')}"
+                           style="width:64px;padding:6px 8px;border-radius:8px;border:2px solid #3b82f6;background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-weight:600;">
+                    <input id="edit-name-${id}" value="${name.replace(/"/g,'&quot;')}"
+                           style="flex:1;min-width:120px;padding:6px 8px;border-radius:8px;border:2px solid #3b82f6;background:var(--bg-primary);color:var(--text-primary);font-size:13px;">
+                    <select id="edit-gender-${id}" style="padding:6px 8px;border-radius:8px;border:2px solid #3b82f6;background:var(--bg-primary);color:var(--text-primary);font-size:13px;">
+                        <option value="Male" ${gender==='Male'?'selected':''}>Male</option>
+                        <option value="Female" ${gender==='Female'?'selected':''}>Female</option>
+                    </select>
+                    <button onclick="saveEditStudent(${id})"
+                            style="padding:6px 14px;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;">✓ Save</button>
+                    <button onclick="renderStudentManagerList()"
+                            style="padding:6px 12px;background:rgba(107,114,128,0.3);color:var(--text-primary);border:none;border-radius:8px;cursor:pointer;font-size:13px;">✕</button>
+                </div>`;
+        }
+
+        async function saveEditStudent(id) {
+            const rollNo = document.getElementById(`edit-roll-${id}`)?.value.trim();
+            const name   = document.getElementById(`edit-name-${id}`)?.value.trim();
+            const gender = document.getElementById(`edit-gender-${id}`)?.value;
+            if (!rollNo || !name) { alert('Roll No and Name are required.'); return; }
+            // Conflict check (skip self)
+            const conflict = await db.students.where('rollNo').equals(rollNo).first();
+            if (conflict && conflict.id !== id) { alert(`Roll No ${rollNo} is already used by "${conflict.name}".`); return; }
+            await db.students.update(id, { rollNo, name, gender });
             renderStudentManagerList();
             loadDailyAttendance();
         }
 
         async function deleteStudent(id, rollNo, name) {
-            if (!confirm(`Delete student "${name}" (Roll: ${rollNo})?\n\nThis will also delete their attendance records.`)) return;
+            if (!confirm(`Delete student "${name}" (Roll: ${rollNo})?\n\nThis will also delete ALL their attendance records.`)) return;
             await db.students.delete(id);
-            await db.attendance.where('rollNo').equals(rollNo).delete();
+            // Delete attendance by studentId (the stable internal key)
+            await db.attendance.where('studentId').equals(id).delete();
 
-            // Sync to cloud
-            const allStudents = await db.students.toArray();
+            const remaining = await db.students.count();
+            if (remaining > 0 && confirm(`Student deleted.\n\nDo you want to auto-renumber the remaining ${remaining} students?`)) {
+                await autoRenumberStudents(false);
+            } else {
+                renderStudentManagerList();
+                loadDailyAttendance();
+            }
+        }
 
+        // ✅ Auto-Renumber: Only changes rollNo on student records.
+        //    Attendance stays linked via studentId — ZERO data corruption.
+        async function autoRenumberStudents(showConfirm = true) {
+            if (showConfirm && !confirm('Renumber all students sequentially (1, 2, 3…) sorted by current roll order?\n\nAttendance history is preserved — this only updates roll numbers.')) return;
+            const students = getSortedStudents(await db.students.toArray());
+            for (let i = 0; i < students.length; i++) {
+                await db.students.update(students[i].id, { rollNo: String(i + 1) });
+            }
             renderStudentManagerList();
             loadDailyAttendance();
+            if (showConfirm) alert(`✅ Renumbered ${students.length} students (Roll 1 to ${students.length}).\n\nAll attendance history is intact.`);
         }
 
         async function renderStudentManagerList() {
-            const students = await db.students.toArray();
-            const sorted = getSortedStudents(students);
-            const container = document.getElementById('student-manager-list');
-            if (!container) return;
-
-            if (sorted.length === 0) {
-                container.innerHTML = `<div style="padding:20px; text-align:center; color:var(--text-secondary); font-size:13px;">No students yet. Upload an Excel or add above.</div>`;
+            const students = getSortedStudents(await db.students.toArray());
+            const container = document.getElementById('student-manager-list'); if (!container) return;
+            if (!students.length) {
+                container.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:13px;">No students yet. Upload an Excel or add above.</div>`;
                 return;
             }
-
-            container.innerHTML = sorted.map(s => {
+            container.innerHTML = students.map(s => {
                 const isFemale = s.gender.toLowerCase().startsWith('f');
-                const borderColor = isFemale ? '#f472b6' : '#60a5fa';
-                return `<div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); border-left:4px solid ${borderColor}; background:var(--bg-tertiary);">
-                    <span style="font-weight:700; font-size:13px; min-width:40px; color:${borderColor};">${s.rollNo}</span>
-                    <span style="flex:1; font-size:14px; font-weight:600;">${s.name}</span>
-                    <span style="font-size:11px; color:var(--text-secondary); background:rgba(255,255,255,0.07); padding:2px 8px; border-radius:20px;">${s.gender}</span>
-                    <button onclick="deleteStudent(${s.id}, '${s.rollNo.replace(/'/g,"\\'")}', '${s.name.replace(/'/g,"\\'")}' )"
-                        style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#f87171; border-radius:8px; padding:4px 10px; cursor:pointer; font-size:13px; font-weight:700;">✕</button>
+                const bc = isFemale ? '#f472b6' : '#60a5fa';
+                return `<div id="student-row-${s.id}" style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                    <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-left:4px solid ${bc};background:var(--bg-tertiary);">
+                        <span style="font-weight:700;font-size:13px;min-width:40px;color:${bc};">${s.rollNo}</span>
+                        <span style="flex:1;font-size:14px;font-weight:600;">${s.name}</span>
+                        <span style="font-size:11px;color:var(--text-secondary);background:rgba(255,255,255,0.07);padding:2px 8px;border-radius:20px;">${s.gender}</span>
+                        <button onclick="startEditStudent(${s.id}, '${s.rollNo.replace(/'/g,"\\'")}', '${s.name.replace(/'/g,"\\'")}', '${s.gender}')"
+                            style="background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.4);color:#60a5fa;border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12px;font-weight:700;">✏️ Edit</button>
+                        <button onclick="deleteStudent(${s.id}, '${s.rollNo.replace(/'/g,"\\'")}', '${s.name.replace(/'/g,"\\'")}' )"
+                            style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:#f87171;border-radius:8px;padding:4px 10px;cursor:pointer;font-size:13px;font-weight:700;">✕</button>
+                    </div>
                 </div>`;
             }).join('');
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // CALCULATE SUMMARY — batch query for performance
+        // ═══════════════════════════════════════════════════════════════
         async function calculateSummary() {
-            const currentMonth = document.getElementById('attendance-month').value;
-            if (!currentMonth) return;
-            const [year, month] = currentMonth.split('-').map(Number);
+            const cm = document.getElementById('attendance-month').value;
+            if (!cm) return;
+            const [year, month] = cm.split('-').map(Number);
             const daysInMonth = new Date(year, month, 0).getDate();
 
-            // Count holidays
             const manualHolidays = await getHolidaysForMonth(year, month);
-            const sundaysCount = countSundaysInMonth(year, month);
-            const autoExcludeSundays = document.getElementById('auto-sundays')?.checked !== false;
-            const sundayDates = new Set(getSundayDates(year, month));
-            const manualHolidayDates = new Set(manualHolidays.map(h => h.date));
+            const sundaysCount   = countSundaysInMonth(year, month);
+            const autoExcSun     = document.getElementById('auto-sundays')?.checked !== false;
+            const manualHolDates = new Set(manualHolidays.map(h => h.date));
 
-            // Working days = total days - manual holidays - (Sundays if auto-exclude, not already counted as manual)
             let excludedDays = manualHolidays.length;
-            if (autoExcludeSundays) {
-                // count sundays not already in manual holidays
-                getSundayDates(year, month).forEach(d => { if (!manualHolidayDates.has(d)) excludedDays++; });
-            }
+            if (autoExcSun) getSundayDates(year, month).forEach(d => { if (!manualHolDates.has(d)) excludedDays++; });
             const workingDays = daysInMonth - excludedDays;
 
-            // Update UI badges
             const sundayBadge = document.getElementById('sunday-count-badge');
             if (sundayBadge) sundayBadge.textContent = `${sundaysCount} Sundays`;
             const wdEl = document.getElementById('working-days-display');
@@ -2128,498 +2006,289 @@
             if (thEl) thEl.textContent = excludedDays;
 
             const students = await db.students.toArray();
-            const boysTotal = students.filter(s => s.gender.toLowerCase() === 'male').length;
+            const boysTotal  = students.filter(s => s.gender.toLowerCase() === 'male').length;
             const girlsTotal = students.filter(s => s.gender.toLowerCase() === 'female').length;
 
-            let boysPresentTotal = 0, boysAbsentTotal = 0;
-            let girlsPresentTotal = 0, girlsAbsentTotal = 0;
+            // ✅ BATCH FETCH for summary
+            const thisMonthMap = await fetchMonthAttendanceMap(year, month);
 
+            let boysPT = 0, boysAT = 0, girlsPT = 0, girlsAT = 0;
             for (let day = 1; day <= daysInMonth; day++) {
-                const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                // Skip holidays & auto-sundays for percentage calculation (still count actuals)
+                const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
                 for (let student of students) {
-                    const attendance = await db.attendance
-                        .where({ date: dateStr, rollNo: student.rollNo })
-                        .first();
-
+                    const rec = thisMonthMap.get(`${dateStr}_${student.id}`);
                     if (student.gender.toLowerCase() === 'male') {
-                        if (attendance?.status === 'present') boysPresentTotal++;
-                        if (attendance?.status === 'absent') boysAbsentTotal++;
+                        if (rec?.status === 'present') boysPT++;
+                        if (rec?.status === 'absent')  boysAT++;
                     } else {
-                        if (attendance?.status === 'present') girlsPresentTotal++;
-                        if (attendance?.status === 'absent') girlsAbsentTotal++;
+                        if (rec?.status === 'present') girlsPT++;
+                        if (rec?.status === 'absent')  girlsAT++;
                     }
                 }
             }
 
-            const boysPercentage = boysTotal > 0 && workingDays > 0 
-                ? ((boysPresentTotal / (boysTotal * workingDays)) * 100).toFixed(2)
-                : 0;
-            const girlsPercentage = girlsTotal > 0 && workingDays > 0
-                ? ((girlsPresentTotal / (girlsTotal * workingDays)) * 100).toFixed(2)
-                : 0;
+            const boysPerc  = boysTotal  > 0 && workingDays > 0 ? ((boysPT  / (boysTotal  * workingDays)) * 100).toFixed(2) : 0;
+            const girlsPerc = girlsTotal > 0 && workingDays > 0 ? ((girlsPT / (girlsTotal * workingDays)) * 100).toFixed(2) : 0;
 
-            document.getElementById('total-present-boys').textContent = boysPresentTotal;
-            document.getElementById('total-absent-boys').textContent = boysAbsentTotal;
-            document.getElementById('total-present-girls').textContent = girlsPresentTotal;
-            document.getElementById('total-absent-girls').textContent = girlsAbsentTotal;
-            document.getElementById('combine-present-monthly').textContent = boysPresentTotal + girlsPresentTotal;
-            document.getElementById('combine-absent-monthly').textContent = boysAbsentTotal + girlsAbsentTotal;
-            document.getElementById('boys-percentage').textContent = boysPercentage + '%';
-            document.getElementById('girls-percentage').textContent = girlsPercentage + '%';
-
-            saveSettings();
+            document.getElementById('total-present-boys').textContent    = boysPT;
+            document.getElementById('total-absent-boys').textContent     = boysAT;
+            document.getElementById('total-present-girls').textContent   = girlsPT;
+            document.getElementById('total-absent-girls').textContent    = girlsAT;
+            document.getElementById('combine-present-monthly').textContent = boysPT + girlsPT;
+            document.getElementById('combine-absent-monthly').textContent  = boysAT + girlsAT;
+            document.getElementById('boys-percentage').textContent  = boysPerc  + '%';
+            document.getElementById('girls-percentage').textContent = girlsPerc + '%';
         }
 
-        async function saveSettings() {
-            // Settings saved via holiday store now; keep for backward compat
-        }
+        async function saveSettings() {}
+        async function loadSettings() {}
 
-        async function loadSettings() {
-            // Legacy: no-op, holiday manager loads from DB
-        }
-
+        // ═══════════════════════════════════════════════════════════════
+        // EXPORT EXCEL — batch query
+        // ═══════════════════════════════════════════════════════════════
         async function exportExcel() {
-            const currentMonth = document.getElementById('attendance-month').value;
-            const [year, month] = currentMonth.split('-').map(Number);
+            const cm = document.getElementById('attendance-month').value;
+            const [year, month] = cm.split('-').map(Number);
             const daysInMonth = new Date(year, month, 0).getDate();
-            const classTitle = getClassTitle();
+            const classTitle  = getClassTitle();
+            const students    = getSortedStudents(await db.students.toArray());
 
-            const students = await db.students.toArray();
-            const sortedStudents = getSortedStudents(students);
-            
-            // Build header row exactly as in table
-            const headerRow = ['Roll No', 'Student Name', 'Gender'];
-            for (let day = 1; day <= daysInMonth; day++) {
-                headerRow.push(day);
-            }
-            headerRow.push('Total Present');
-            headerRow.push('Total Absent');
-            headerRow.push('Previous Month Present');
-            headerRow.push('Combine Present');
+            // Prev month info
+            let pY = year, pM = month - 1; if (pM === 0) { pM = 12; pY--; }
+            const prevMonthMap = await fetchMonthAttendanceMap(pY, pM);
+            const thisMonthMap = await fetchMonthAttendanceMap(year, month);
 
-            // Title row at top if class is selected
-            const titleRow = classTitle ? [`Attendance Report - ${classTitle} | Month: ${currentMonth}`] : [`Attendance Report | Month: ${currentMonth}`];
+            const headerRow = ['Roll No','Student Name','Gender'];
+            for (let d = 1; d <= daysInMonth; d++) headerRow.push(d);
+            headerRow.push('Total Present','Total Absent','Previous Month Present','Combine Present');
+
+            const titleRow = [(classTitle ? `Attendance Report - ${classTitle}` : 'Attendance Report') + ` | Month: ${cm}`];
             const data = [titleRow, headerRow];
 
-            for (let student of sortedStudents) {
-                let row = [];
-                
-                // Auto-calculate previous month present per student
-                const prevMonthPresent = await getPrevMonthPresent(student.rollNo, year, month);
+            for (let student of students) {
+                let prevMonthPresent = 0;
+                prevMonthMap.forEach((rec, key) => { if (key.endsWith(`_${student.id}`) && rec.status === 'present') prevMonthPresent++; });
 
-                // First three columns - exactly as in table
-                row.push(student.rollNo);
-                row.push(student.name);
-                row.push(student.gender);
-
-                let totalPresent = 0;
-                let totalAbsent = 0;
-
-                // Then all the day columns
+                let row = [student.rollNo, student.name, student.gender];
+                let totalPresent = 0, totalAbsent = 0;
                 for (let day = 1; day <= daysInMonth; day++) {
-                    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                    const attendance = await db.attendance
-                        .where({ date: dateStr, rollNo: student.rollNo })
-                        .first();
-
-                    const status = attendance?.status === 'present' ? 'P' : attendance?.status === 'absent' ? 'A' : '';
-                    row.push(status);
-                    
-                    if (status === 'P') totalPresent++;
-                    if (status === 'A') totalAbsent++;
+                    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                    const rec = thisMonthMap.get(`${dateStr}_${student.id}`);
+                    const s = rec?.status === 'present' ? 'P' : rec?.status === 'absent' ? 'A' : '';
+                    row.push(s); if (s==='P') totalPresent++; if (s==='A') totalAbsent++;
                 }
-
-                // Last four columns - exactly as in table
-                row.push(totalPresent);
-                row.push(totalAbsent);
-                row.push(prevMonthPresent);
-                row.push(totalPresent + prevMonthPresent);
-
+                row.push(totalPresent, totalAbsent, prevMonthPresent, totalPresent + prevMonthPresent);
                 data.push(row);
             }
 
             const ws = XLSX.utils.aoa_to_sheet(data);
-            
-            // Set column widths
-            ws['!cols'] = [
-                { wch: 10 },  // Roll No
-                { wch: 30 }, // Student Name
-                { wch: 12 }, // Gender
-            ];
-            
-            // Add width for day columns
-            for (let i = 0; i < daysInMonth; i++) {
-                ws['!cols'].push({ wch: 4 });
-            }
-            
-            // Add width for summary columns
-            ws['!cols'].push({ wch: 14 }); // Total Present
-            ws['!cols'].push({ wch: 14 }); // Total Absent
-            ws['!cols'].push({ wch: 22 }); // Previous Month Present
-            ws['!cols'].push({ wch: 16 }); // Combine Present
-
+            ws['!cols'] = [{wch:10},{wch:30},{wch:12},...Array(daysInMonth).fill({wch:4}),{wch:14},{wch:14},{wch:22},{wch:16}];
             const wb = XLSX.utils.book_new();
-            const sheetName = classTitle ? classTitle.replace(/\s*-\s*/g, '_').substring(0, 31) : 'Attendance';
+            const sheetName = (classTitle ? classTitle.replace(/\s*-\s*/g,'_') : 'Attendance').substring(0,31);
             XLSX.utils.book_append_sheet(wb, ws, sheetName);
-            const fileName = classTitle
-                ? `Attendance_${classTitle.replace(/\s+/g,'_')}_${currentMonth}.xlsx`
-                : `Attendance_${currentMonth}.xlsx`;
-            XLSX.writeFile(wb, fileName);
+            XLSX.writeFile(wb, (classTitle ? `Attendance_${classTitle.replace(/\s+/g,'_')}_${cm}` : `Attendance_${cm}`) + '.xlsx');
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // EXPORT PDF — batch query
+        // ═══════════════════════════════════════════════════════════════
         async function exportPDF() {
             try {
-                // Get jsPDF - handle both window.jspdf and window.jsPDF
                 const jsPDFLib = window.jspdf || window.jsPDF;
-                if (typeof jsPDFLib === 'undefined') {
-                    alert('PDF library is loading... Please wait a moment and try again.');
-                    return;
-                }
-
+                if (!jsPDFLib) { alert('PDF library loading… try again in a moment.'); return; }
                 const jsPDF = jsPDFLib.jsPDF || jsPDFLib;
-                const doc = new jsPDF('l', 'mm', 'a4');
+                const doc = new jsPDF('l','mm','a4');
+                if (!doc.autoTable) { alert('PDF table plugin not loaded. Please refresh.'); return; }
 
-                // Check if autoTable is available
-                if (typeof doc.autoTable === 'undefined') {
-                    alert('PDF table plugin is not loaded. Please refresh the page and try again.');
-                    console.error('autoTable plugin not loaded');
-                    return;
-                }
-
-                const currentMonth = document.getElementById('attendance-month').value;
-                const [year, month] = currentMonth.split('-').map(Number);
+                const cm = document.getElementById('attendance-month').value;
+                const [year, month] = cm.split('-').map(Number);
                 const daysInMonth = new Date(year, month, 0).getDate();
+                const students = getSortedStudents(await db.students.toArray());
 
-                const students = await db.students.toArray();
-                const sortedStudents = getSortedStudents(students);
+                let pY = year, pM = month - 1; if (pM === 0) { pM = 12; pY--; }
+                const prevMonthMap = await fetchMonthAttendanceMap(pY, pM);
+                const thisMonthMap = await fetchMonthAttendanceMap(year, month);
+
                 const tableData = [];
-
-                for (let student of sortedStudents) {
-                    let row = [];
-                    
-                    // Auto-calculate previous month present per student
-                    const prevMonthPresent = await getPrevMonthPresent(student.rollNo, year, month);
-
-                    // First three columns - exactly as in table
-                    row.push(student.rollNo);
-                    row.push(student.name);
-                    row.push(student.gender);
-
-                    let totalPresent = 0;
-                    let totalAbsent = 0;
-
-                    // Then all the day columns
+                for (let student of students) {
+                    let prevMonthPresent = 0;
+                    prevMonthMap.forEach((rec, key) => { if (key.endsWith(`_${student.id}`) && rec.status === 'present') prevMonthPresent++; });
+                    let row = [student.rollNo, student.name, student.gender];
+                    let totalPresent = 0, totalAbsent = 0;
                     for (let day = 1; day <= daysInMonth; day++) {
-                        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                        const attendance = await db.attendance
-                            .where({ date: dateStr, rollNo: student.rollNo })
-                            .first();
-
-                        const status = attendance?.status === 'present' ? 'P' : attendance?.status === 'absent' ? 'A' : '';
-                        row.push(status);
-                        
-                        if (status === 'P') totalPresent++;
-                        if (status === 'A') totalAbsent++;
+                        const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                        const rec = thisMonthMap.get(`${dateStr}_${student.id}`);
+                        const s = rec?.status === 'present' ? 'P' : rec?.status === 'absent' ? 'A' : '';
+                        row.push(s); if (s==='P') totalPresent++; if (s==='A') totalAbsent++;
                     }
-
-                    // Last four columns - exactly as in table
-                    row.push(totalPresent);
-                    row.push(totalAbsent);
-                    row.push(prevMonthPresent);
-                    row.push(totalPresent + prevMonthPresent);
-
+                    row.push(totalPresent, totalAbsent, prevMonthPresent, totalPresent + prevMonthPresent);
                     tableData.push(row);
                 }
 
-                // Build header - exactly as in table
-                let headers = [['Roll No', 'Student Name', 'Gender']];
-                
-                // Add day headers
-                for (let day = 1; day <= daysInMonth; day++) {
-                    headers[0].push(day.toString());
-                }
-                
-                // Add summary headers
-                headers[0].push('Total Present');
-                headers[0].push('Total Absent');
-                headers[0].push('Previous Month Present');
-                headers[0].push('Combine Present');
-
-                // Add title
+                const headers = [['Roll No','Student Name','Gender',...Array.from({length:daysInMonth},(_,i)=>String(i+1)),'Total Present','Total Absent','Prev Month Present','Combine Present']];
                 const classTitle = getClassTitle();
-                doc.setFontSize(16);
-                doc.setFont('helvetica', 'bold');
-                const mainTitle = classTitle
-                    ? `Attendance Report - ${classTitle} | ${currentMonth}`
-                    : `Attendance Report - ${currentMonth}`;
-                doc.text(mainTitle, 14, 15);
+                doc.setFontSize(16); doc.setFont('helvetica','bold');
+                doc.text((classTitle ? `Attendance Report - ${classTitle} | ` : 'Attendance Report | ') + cm, 14, 15);
 
-                // Create table with autoTable
                 doc.autoTable({
-                    head: headers,
-                    body: tableData,
-                    startY: 25,
-                    theme: 'grid',
-                    styles: { 
-                        fontSize: 7, 
-                        cellPadding: 1,
-                        halign: 'center',
-                        valign: 'middle'
-                    },
-                    headStyles: { 
-                        fillColor: [59, 130, 246],
-                        fontStyle: 'bold',
-                        fontSize: 7,
-                        halign: 'center'
-                    },
-                    columnStyles: {
-                        0: { cellWidth: 12, halign: 'center' },
-                        1: { cellWidth: 35, halign: 'left' },
-                        2: { cellWidth: 15, halign: 'center' }
-                    },
-                    didParseCell: function(data) {
-                        const colIndex = data.column.index;
-                        const totalCols = 3 + daysInMonth + 4;
-                        
-                        if (colIndex === totalCols - 4 && data.row.section === 'body') {
-                            data.cell.styles.fillColor = [220, 252, 231];
-                            data.cell.styles.textColor = [22, 163, 74];
-                            data.cell.styles.fontStyle = 'bold';
-                        }
-                        
-                        if (colIndex === totalCols - 3 && data.row.section === 'body') {
-                            data.cell.styles.fillColor = [254, 226, 226];
-                            data.cell.styles.textColor = [220, 38, 38];
-                            data.cell.styles.fontStyle = 'bold';
-                        }
-                        
-                        if (colIndex === totalCols - 1 && data.row.section === 'body') {
-                            data.cell.styles.fillColor = [219, 234, 254];
-                            data.cell.styles.textColor = [59, 130, 246];
-                            data.cell.styles.fontStyle = 'bold';
-                        }
+                    head: headers, body: tableData, startY: 25, theme: 'grid',
+                    styles: { fontSize:7, cellPadding:1, halign:'center', valign:'middle' },
+                    headStyles: { fillColor:[59,130,246], fontStyle:'bold', fontSize:7, halign:'center' },
+                    columnStyles: { 0:{cellWidth:12,halign:'center'}, 1:{cellWidth:35,halign:'left'}, 2:{cellWidth:15,halign:'center'} },
+                    didParseCell(data) {
+                        const c = data.column.index, total = 3 + daysInMonth + 4;
+                        if (data.row.section !== 'body') return;
+                        if (c === total-4) { data.cell.styles.fillColor=[220,252,231]; data.cell.styles.textColor=[22,163,74]; data.cell.styles.fontStyle='bold'; }
+                        if (c === total-3) { data.cell.styles.fillColor=[254,226,226]; data.cell.styles.textColor=[220,38,38];  data.cell.styles.fontStyle='bold'; }
+                        if (c === total-1) { data.cell.styles.fillColor=[219,234,254]; data.cell.styles.textColor=[59,130,246]; data.cell.styles.fontStyle='bold'; }
                     }
                 });
-
-                const pdfFileName = classTitle
-                    ? `Attendance_${classTitle.replace(/\s+/g,'_')}_${currentMonth}.pdf`
-                    : `Attendance_${currentMonth}.pdf`;
-                doc.save(pdfFileName);
-                
-            } catch (error) {
-                console.error('PDF Export Error:', error);
-                alert('Error creating PDF: ' + error.message + '\n\nPlease refresh the page and try again.');
-            }
+                doc.save((classTitle ? `Attendance_${classTitle.replace(/\s+/g,'_')}_${cm}` : `Attendance_${cm}`) + '.pdf');
+            } catch (err) { console.error(err); alert('Error: ' + err.message + '\n\nPlease refresh and try again.'); }
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // BACKUP & RESTORE FUNCTIONS
+        // BACKUP & RESTORE — preserves student IDs so attendance refs stay valid
         // ═══════════════════════════════════════════════════════════════
-
         async function backupData() {
             try {
-                const students  = await db.students.toArray();
-                const attendance = await db.attendance.toArray();
-                const holidays  = await db.holidays.toArray();
-                const settings  = await db.settings.toArray();
-
-                const backup = {
-                    version: 1,
-                    exportedAt: new Date().toISOString(),
-                    students,
-                    attendance,
-                    holidays,
-                    settings
-                };
-
+                const students    = await db.students.toArray();
+                const attendance  = await db.attendance.toArray();
+                const holidays    = await db.holidays.toArray();
+                const settings    = await db.settings.toArray();
+                const backup = { version: 2, exportedAt: new Date().toISOString(), students, attendance, holidays, settings };
                 const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-                const url  = URL.createObjectURL(blob);
-                const a    = document.createElement('a');
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
                 const date = new Date().toISOString().split('T')[0];
-                a.href     = url;
-                a.download = `SAT_Backup_${date}.json`;
-                a.click();
+                a.href = url; a.download = `SAT_Backup_${date}.json`; a.click();
                 URL.revokeObjectURL(url);
-
-                alert(`✅ Backup saved!\n\nFile: SAT_Backup_${date}.json\nStudents: ${students.length} | Attendance records: ${attendance.length} | Holidays: ${holidays.length}\n\nStore this file safely (Google Drive, WhatsApp, USB etc.)`);
-            } catch (err) {
-                alert('❌ Backup failed: ' + err.message);
-            }
+                alert(`✅ Backup saved!\n\nStudents: ${students.length} | Records: ${attendance.length} | Holidays: ${holidays.length}\n\nStore safely (Drive/WhatsApp/USB).`);
+            } catch (err) { alert('❌ Backup failed: ' + err.message); }
         }
 
         async function restoreData(event) {
-            const file = event.target.files[0];
-            event.target.value = ''; // reset so same file can be picked again
-            if (!file) return;
-
-            if (!confirm('⚠️ Restore will REPLACE all current data with the backup.\n\nAre you sure you want to continue?')) return;
-
+            const file = event.target.files[0]; event.target.value = ''; if (!file) return;
+            if (!confirm('⚠️ Restore will REPLACE all current data. Continue?')) return;
             const reader = new FileReader();
             reader.onload = async function(e) {
                 try {
                     const backup = JSON.parse(e.target.result);
-
                     if (!backup.version || !Array.isArray(backup.students) || !Array.isArray(backup.attendance)) {
-                        alert('❌ Invalid backup file. Please select a valid SAT backup (.json).');
-                        return;
+                        alert('❌ Invalid backup file.'); return;
                     }
+                    await db.students.clear(); await db.attendance.clear(); await db.holidays.clear(); await db.settings.clear();
 
-                    // Clear existing data
-                    await db.students.clear();
-                    await db.attendance.clear();
-                    await db.holidays.clear();
-                    await db.settings.clear();
+                    const stripAutoId = arr => arr.map(({ id, ...rest }) => rest);
 
-                    // Restore — strip auto-generated id so Dexie reassigns them cleanly
-                    const strip = arr => arr.map(({ id, ...rest }) => rest);
+                    // Restore students WITH original IDs so attendance studentId refs remain valid
+                    if (backup.students.length) await db.students.bulkPut(backup.students);
 
-                    if (backup.students.length)   await db.students.bulkAdd(strip(backup.students));
-                    if (backup.attendance.length) await db.attendance.bulkAdd(strip(backup.attendance));
-                    if (backup.holidays.length)   await db.holidays.bulkAdd(strip(backup.holidays));
-                    if (backup.settings?.length)  {
-                        for (const s of backup.settings) {
-                            await db.settings.put({ key: s.key, value: s.value });
+                    // Handle both v1 (rollNo) and v2 (studentId) backup formats
+                    if (backup.attendance.length) {
+                        const isOldFormat = backup.attendance[0].rollNo !== undefined && backup.attendance[0].studentId === undefined;
+                        if (isOldFormat) {
+                            // Migrate: map rollNo → studentId using restored students
+                            const rollNoToId = {};
+                            backup.students.forEach(s => { rollNoToId[s.rollNo] = s.id; });
+                            const migrated = backup.attendance
+                                .map(a => ({ date: a.date, studentId: rollNoToId[a.rollNo], status: a.status, remark: a.remark }))
+                                .filter(a => a.studentId !== undefined);
+                            if (migrated.length) await db.attendance.bulkAdd(migrated);
+                        } else {
+                            await db.attendance.bulkAdd(stripAutoId(backup.attendance));
                         }
                     }
+                    if (backup.holidays?.length) await db.holidays.bulkAdd(stripAutoId(backup.holidays));
+                    if (backup.settings?.length) for (const s of backup.settings) await db.settings.put({ key: s.key, value: s.value });
 
-                    alert(`✅ Restore complete!\n\nStudents: ${backup.students.length} | Attendance records: ${backup.attendance.length} | Holidays: ${backup.holidays.length}\n\nBackup was from: ${backup.exportedAt ? new Date(backup.exportedAt).toLocaleString() : 'unknown date'}`);
-
-                    loadDailyAttendance();
-                    renderStudentManagerList();
-                } catch (err) {
-                    alert('❌ Restore failed: ' + err.message + '\n\nMake sure you selected a valid SAT backup file.');
-                }
+                    alert(`✅ Restore complete!\n\nStudents: ${backup.students.length} | Records: ${backup.attendance.length} | Holidays: ${backup.holidays?.length || 0}\n\nBackup from: ${backup.exportedAt ? new Date(backup.exportedAt).toLocaleString() : 'unknown'}`);
+                    loadDailyAttendance(); renderStudentManagerList();
+                } catch (err) { alert('❌ Restore failed: ' + err.message); }
             };
             reader.readAsText(file);
         }
 
         async function clearAllData() {
-            if (confirm('Are you sure you want to clear all data? This cannot be undone!')) {
-                await db.students.clear();
-                await db.attendance.clear();
-                await db.settings.clear();
-                alert('All data has been cleared.');
-                loadDailyAttendance();
-            }
+            if (!confirm('Clear ALL data? This cannot be undone!')) return;
+            await db.students.clear(); await db.attendance.clear(); await db.settings.clear();
+            alert('All data cleared.'); loadDailyAttendance();
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // YEARLY WORKING DAYS SUMMARY FUNCTIONS
+        // YEARLY WORKING DAYS SUMMARY
         // ═══════════════════════════════════════════════════════════════
-
         async function loadYearlySummary() {
             const fromYear  = parseInt(document.getElementById('summary-from-year').value);
             const fromMonth = parseInt(document.getElementById('summary-from-month').value);
             const toYear    = parseInt(document.getElementById('summary-to-year').value);
             const toMonth   = parseInt(document.getElementById('summary-to-month').value);
-
             if (!fromYear || !fromMonth || !toYear || !toMonth) return;
-
-            // Validate: from must be <= to
             if (fromYear > toYear || (fromYear === toYear && fromMonth > toMonth)) {
-                document.getElementById('yearly-summary-body').innerHTML =
-                    `<tr><td colspan="6" style="padding:30px; text-align:center; color:#f87171;">⚠️ "From" date must be before or same as "To" date.</td></tr>`;
+                document.getElementById('yearly-summary-body').innerHTML = `<tr><td colspan="6" style="padding:30px;text-align:center;color:#f87171;">⚠️ "From" date must be before or same as "To" date.</td></tr>`;
                 return;
             }
+            const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+            const months = []; let cy = fromYear, cm2 = fromMonth;
+            while (cy < toYear || (cy === toYear && cm2 <= toMonth)) { months.push({year:cy, month:cm2}); cm2++; if (cm2>12){cm2=1;cy++;} }
 
-            const monthNames = ['January','February','March','April','May','June',
-                                'July','August','September','October','November','December'];
+            let runningTotal = 0, totalWorkingAll = 0, totalHolidaysAll = 0, totalSundaysAll = 0, totalDaysAll = 0, bodyHTML = '';
+            const autoExcSun = document.getElementById('auto-sundays')?.checked !== false;
 
-            // Build list of {year, month} pairs
-            const months = [];
-            let cy = fromYear, cm = fromMonth;
-            while (cy < toYear || (cy === toYear && cm <= toMonth)) {
-                months.push({ year: cy, month: cm });
-                cm++;
-                if (cm > 12) { cm = 1; cy++; }
-            }
-
-            let runningTotal = 0;
-            let totalWorkingAll = 0, totalHolidaysAll = 0, totalSundaysAll = 0, totalDaysAll = 0;
-            let bodyHTML = '';
-
-            for (const { year: y, month: m } of months) {
-                const daysInMonth = new Date(y, m, 0).getDate();
-                totalDaysAll += daysInMonth;
-
-                // Count sundays
-                const sundayDates = getSundayDates(y, m);
-                const sundayCount = sundayDates.length;
-                totalSundaysAll += sundayCount;
-
-                // Count manual holidays
+            for (const { year:y, month:m } of months) {
+                const daysInMonth = new Date(y, m, 0).getDate(); totalDaysAll += daysInMonth;
+                const sundayDates = getSundayDates(y, m); totalSundaysAll += sundayDates.length;
                 const manualHolidays = await getHolidaysForMonth(y, m);
-                const sundaySet = new Set(sundayDates);
-                const manualHolidayDates = new Set(manualHolidays.map(h => h.date));
-
-                // Check auto-sundays setting (use monthly tab setting if available)
-                const autoExcSun = document.getElementById('auto-sundays')?.checked !== false;
-
+                const manualHolDates = new Set(manualHolidays.map(h => h.date));
                 let excludedDays = manualHolidays.length;
-                if (autoExcSun) {
-                    sundayDates.forEach(d => { if (!manualHolidayDates.has(d)) excludedDays++; });
-                }
+                if (autoExcSun) sundayDates.forEach(d => { if (!manualHolDates.has(d)) excludedDays++; });
                 totalHolidaysAll += excludedDays;
-
                 const workingDays = daysInMonth - excludedDays;
-                runningTotal += workingDays;
-                totalWorkingAll += workingDays;
-
-                const isCurrentMonth = (y === new Date().getFullYear() && m === new Date().getMonth() + 1);
-                const rowStyle = isCurrentMonth ? 'background:rgba(16,185,129,0.08);' : '';
-
-                bodyHTML += `<tr style="${rowStyle}">
-                    <td class="month-name" style="text-align:left; font-weight:600;">
-                        ${isCurrentMonth ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:8px;vertical-align:middle;"></span>' : ''}
-                        ${monthNames[m-1]} ${y}
-                    </td>
+                runningTotal += workingDays; totalWorkingAll += workingDays;
+                const isCurrent = (y === new Date().getFullYear() && m === new Date().getMonth()+1);
+                bodyHTML += `<tr style="${isCurrent?'background:rgba(16,185,129,0.08);':''}">
+                    <td class="month-name" style="text-align:left;font-weight:600;">
+                        ${isCurrent?'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:8px;vertical-align:middle;"></span>':''}
+                        ${monthNames[m-1]} ${y}</td>
                     <td>${daysInMonth}</td>
-                    <td style="color:#f87171;">${autoExcSun ? sundayCount : 0}</td>
+                    <td style="color:#f87171;">${autoExcSun ? sundayDates.length : 0}</td>
                     <td style="color:#fbbf24;">${manualHolidays.length}</td>
                     <td><span class="wd-badge">${workingDays}</span></td>
                     <td><span class="running-total-badge">${runningTotal}</span></td>
                 </tr>`;
             }
-
-            // Total row
             bodyHTML += `<tr class="total-row">
-                <td class="month-name" style="font-weight:800; color:#10b981; text-align:left;">
-                    <i class="fas fa-sigma" style="margin-right:6px;"></i> TOTAL (${months.length} months)
-                </td>
-                <td>${totalDaysAll}</td>
-                <td>${totalSundaysAll}</td>
-                <td>${totalHolidaysAll - totalSundaysAll < 0 ? 0 : totalHolidaysAll - totalSundaysAll}</td>
+                <td class="month-name" style="font-weight:800;color:#10b981;text-align:left;"><i class="fas fa-sigma" style="margin-right:6px;"></i> TOTAL (${months.length} months)</td>
+                <td>${totalDaysAll}</td><td>${totalSundaysAll}</td>
+                <td>${Math.max(0,totalHolidaysAll-totalSundaysAll)}</td>
                 <td><span class="wd-badge" style="font-size:17px;">${totalWorkingAll}</span></td>
                 <td><span class="running-total-badge" style="font-size:17px;">${totalWorkingAll}</span></td>
             </tr>`;
-
             document.getElementById('yearly-summary-body').innerHTML = bodyHTML;
 
-            // Stat cards
             document.getElementById('summary-stat-cards').innerHTML = `
-                <div class="summary-card" style="background:linear-gradient(135deg,#10b981,#059669); color:white; padding:20px; border-radius:12px;">
-                    <div class="summary-title" style="font-size:11px; text-transform:uppercase; letter-spacing:1px; opacity:0.9; margin-bottom:8px;">Total Working Days</div>
-                    <div style="font-size:42px; font-weight:800; font-family:'JetBrains Mono',monospace;">${totalWorkingAll}</div>
-                    <div style="font-size:12px; opacity:0.85; margin-top:4px;">${months.length} months tracked</div>
+                <div class="summary-card" style="background:linear-gradient(135deg,#10b981,#059669);color:white;padding:20px;border-radius:12px;">
+                    <div class="summary-title" style="font-size:11px;text-transform:uppercase;letter-spacing:1px;opacity:0.9;margin-bottom:8px;">Total Working Days</div>
+                    <div style="font-size:42px;font-weight:800;font-family:'JetBrains Mono',monospace;">${totalWorkingAll}</div>
+                    <div style="font-size:12px;opacity:0.85;margin-top:4px;">${months.length} months tracked</div>
                 </div>
-                <div class="summary-card" style="background:linear-gradient(135deg,#ef4444,#dc2626); color:white; padding:20px; border-radius:12px;">
-                    <div class="summary-title" style="font-size:11px; text-transform:uppercase; letter-spacing:1px; opacity:0.9; margin-bottom:8px;">Total Holidays</div>
-                    <div style="font-size:42px; font-weight:800; font-family:'JetBrains Mono',monospace;">${totalHolidaysAll}</div>
-                    <div style="font-size:12px; opacity:0.85; margin-top:4px;">Sundays + manual holidays</div>
+                <div class="summary-card" style="background:linear-gradient(135deg,#ef4444,#dc2626);color:white;padding:20px;border-radius:12px;">
+                    <div class="summary-title" style="font-size:11px;text-transform:uppercase;letter-spacing:1px;opacity:0.9;margin-bottom:8px;">Total Holidays</div>
+                    <div style="font-size:42px;font-weight:800;font-family:'JetBrains Mono',monospace;">${totalHolidaysAll}</div>
+                    <div style="font-size:12px;opacity:0.85;margin-top:4px;">Sundays + manual holidays</div>
                 </div>
-                <div class="summary-card" style="background:linear-gradient(135deg,#3b82f6,#2563eb); color:white; padding:20px; border-radius:12px;">
-                    <div class="summary-title" style="font-size:11px; text-transform:uppercase; letter-spacing:1px; opacity:0.9; margin-bottom:8px;">Total Calendar Days</div>
-                    <div style="font-size:42px; font-weight:800; font-family:'JetBrains Mono',monospace;">${totalDaysAll}</div>
-                    <div style="font-size:12px; opacity:0.85; margin-top:4px;">Across selected range</div>
+                <div class="summary-card" style="background:linear-gradient(135deg,#3b82f6,#2563eb);color:white;padding:20px;border-radius:12px;">
+                    <div class="summary-title" style="font-size:11px;text-transform:uppercase;letter-spacing:1px;opacity:0.9;margin-bottom:8px;">Total Calendar Days</div>
+                    <div style="font-size:42px;font-weight:800;font-family:'JetBrains Mono',monospace;">${totalDaysAll}</div>
+                    <div style="font-size:12px;opacity:0.85;margin-top:4px;">Across selected range</div>
                 </div>
-                <div class="summary-card" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9); color:white; padding:20px; border-radius:12px;">
-                    <div class="summary-title" style="font-size:11px; text-transform:uppercase; letter-spacing:1px; opacity:0.9; margin-bottom:8px;">Avg Working Days/Month</div>
-                    <div style="font-size:42px; font-weight:800; font-family:'JetBrains Mono',monospace;">${months.length > 0 ? (totalWorkingAll / months.length).toFixed(1) : 0}</div>
-                    <div style="font-size:12px; opacity:0.85; margin-top:4px;">Per month average</div>
-                </div>
-            `;
+                <div class="summary-card" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:white;padding:20px;border-radius:12px;">
+                    <div class="summary-title" style="font-size:11px;text-transform:uppercase;letter-spacing:1px;opacity:0.9;margin-bottom:8px;">Avg Working Days/Month</div>
+                    <div style="font-size:42px;font-weight:800;font-family:'JetBrains Mono',monospace;">${months.length > 0 ? (totalWorkingAll/months.length).toFixed(1) : 0}</div>
+                    <div style="font-size:12px;opacity:0.85;margin-top:4px;">Per month average</div>
+                </div>`;
         }
+
     </script>
 </body>
 </html>
