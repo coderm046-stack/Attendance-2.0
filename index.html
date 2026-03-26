@@ -1715,45 +1715,31 @@
 
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', async () => {
-                // Unregister ALL old service workers first — this forces the browser
-                // to always fetch fresh content and fixes the "old version" PWA bug
-                const regs = await navigator.serviceWorker.getRegistrations();
-                for (const reg of regs) await reg.unregister();
-
-                // Register a network-first SW: always try network, cache only as fallback
-                const swCode = `
-const CACHE_NAME = 'sat-v3-${Date.now()}';
-// On install: skip waiting so the new SW activates immediately
-self.addEventListener('install', e => { self.skipWaiting(); });
-// On activate: delete ALL old caches so stale assets are gone
-self.addEventListener('activate', e => {
-    e.waitUntil(
-        caches.keys().then(keys =>
-            Promise.all(keys.map(k => caches.delete(k)))
-        ).then(() => self.clients.claim())
-    );
-});
-// Fetch: network-first — try network, fall back to cache, never serve stale index.html
-self.addEventListener('fetch', e => {
-    if (e.request.method !== 'GET') return;
-    e.respondWith(
-        fetch(e.request)
-            .then(res => {
-                // Cache a copy of successful responses
-                const clone = res.clone();
-                caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
-                return res;
-            })
-            .catch(() => caches.match(e.request))
-    );
-});`;
                 try {
-                    const blob = new Blob([swCode], { type: 'application/javascript' });
-                    const swUrl = URL.createObjectURL(blob);
-                    const reg = await navigator.serviceWorker.register(swUrl);
-                    // Force immediate activation of new SW
-                    if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-                } catch (e) { console.warn('SW registration failed:', e); }
+                    // Register the real sw.js file (blob URLs are blocked by Chrome)
+                    const reg = await navigator.serviceWorker.register('./sw.js');
+
+                    // If a new SW is waiting, activate it immediately
+                    if (reg.waiting) {
+                        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                    }
+
+                    // When a new SW installs, reload the page to get the fresh version
+                    reg.addEventListener('updatefound', () => {
+                        const newWorker = reg.installing;
+                        newWorker.addEventListener('statechange', () => {
+                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                // New version ready — reload silently to apply update
+                                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                                    window.location.reload();
+                                });
+                                newWorker.postMessage({ type: 'SKIP_WAITING' });
+                            }
+                        });
+                    });
+                } catch (e) {
+                    console.warn('SW registration failed:', e);
+                }
             });
         }
 
