@@ -5,7 +5,7 @@
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#1a1a2e",
-  "theme_color": "#3b82f6",
+  "theme_color": "#2196F3",
   "orientation": "any",
   "icons": [
     {
@@ -31,5 +31,5 @@
   "categories": ["education", "productivity"],
   "lang": "en-US",
   "dir": "ltr",
-  "version": "1.0"
+  "version": "2.5"
 }
