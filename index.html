@@ -1714,11 +1714,46 @@
         });
 
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js').catch(() => {
-                    const swCode = `const CACHE_NAME='attendance-v1';self.addEventListener('install',e=>{self.skipWaiting();});self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request)));});`;
-                    navigator.serviceWorker.register(URL.createObjectURL(new Blob([swCode],{type:'application/javascript'})));
-                });
+            window.addEventListener('load', async () => {
+                // Unregister ALL old service workers first — this forces the browser
+                // to always fetch fresh content and fixes the "old version" PWA bug
+                const regs = await navigator.serviceWorker.getRegistrations();
+                for (const reg of regs) await reg.unregister();
+
+                // Register a network-first SW: always try network, cache only as fallback
+                const swCode = `
+const CACHE_NAME = 'sat-v3-${Date.now()}';
+// On install: skip waiting so the new SW activates immediately
+self.addEventListener('install', e => { self.skipWaiting(); });
+// On activate: delete ALL old caches so stale assets are gone
+self.addEventListener('activate', e => {
+    e.waitUntil(
+        caches.keys().then(keys =>
+            Promise.all(keys.map(k => caches.delete(k)))
+        ).then(() => self.clients.claim())
+    );
+});
+// Fetch: network-first — try network, fall back to cache, never serve stale index.html
+self.addEventListener('fetch', e => {
+    if (e.request.method !== 'GET') return;
+    e.respondWith(
+        fetch(e.request)
+            .then(res => {
+                // Cache a copy of successful responses
+                const clone = res.clone();
+                caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+                return res;
+            })
+            .catch(() => caches.match(e.request))
+    );
+});`;
+                try {
+                    const blob = new Blob([swCode], { type: 'application/javascript' });
+                    const swUrl = URL.createObjectURL(blob);
+                    const reg = await navigator.serviceWorker.register(swUrl);
+                    // Force immediate activation of new SW
+                    if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                } catch (e) { console.warn('SW registration failed:', e); }
             });
         }
 
@@ -2481,53 +2516,100 @@
             const classTitle  = getClassTitle();
             const students    = getSortedStudents(await db.students.toArray());
 
-            // Prev month info
             let pY = year, pM = month - 1; if (pM === 0) { pM = 12; pY--; }
             const prevMonthMap  = await fetchMonthAttendanceMap(pY, pM);
             const thisMonthMap  = await fetchMonthAttendanceMap(year, month);
             const workingDays   = await getWorkingDaysForMonth(year, month);
 
-            // Row 1 — Report title
-            const titleRow = [(classTitle ? `Attendance Report - ${classTitle}` : 'Attendance Report') + ` | Month: ${cm}`];
-            // Row 2 — Working days info
-            const wdRow = [`Working Days of this month = ${workingDays}`];
-            // Row 3 — blank spacer
-            const spacerRow = [];
-            // Row 4 — column headers
+            const titleRow  = [(classTitle ? `Attendance Report - ${classTitle}` : 'Attendance Report') + ` | Month: ${cm}`];
+            const wdRow     = [`Working Days of this month = ${workingDays}`];
             const headerRow = ['Roll No','Student Name','Gender'];
             for (let d = 1; d <= daysInMonth; d++) headerRow.push(d);
             headerRow.push('Total Present','Total Absent','Previous Month Present','Combine Present');
 
-            const data = [titleRow, wdRow, spacerRow, headerRow];
+            const data = [titleRow, wdRow, [], headerRow];
+
+            // ── Build student rows & accumulate summary totals ──────────
+            let boysPT=0, boysAT=0, girlsPT=0, girlsAT=0;
+            const boysCount  = students.filter(s => s.gender.toLowerCase()==='male').length;
+            const girlsCount = students.filter(s => s.gender.toLowerCase()!=='male').length;
 
             for (let student of students) {
+                const isMale = student.gender.toLowerCase() === 'male';
                 let prevMonthPresent = 0;
-                prevMonthMap.forEach((rec, key) => { if (key.endsWith(`_${student.id}`) && rec.status === 'present') prevMonthPresent++; });
+                prevMonthMap.forEach((rec, key) => { if (key.endsWith(`_${student.id}`) && rec.status==='present') prevMonthPresent++; });
 
                 let row = [student.rollNo, student.name, student.gender];
-                let totalPresent = 0, totalAbsent = 0;
+                let totalPresent=0, totalAbsent=0;
                 for (let day = 1; day <= daysInMonth; day++) {
                     const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
                     const rec = thisMonthMap.get(`${dateStr}_${student.id}`);
-                    const s = rec?.status === 'present' ? 'P' : rec?.status === 'absent' ? 'A' : '';
-                    row.push(s); if (s==='P') totalPresent++; if (s==='A') totalAbsent++;
+                    const s = rec?.status==='present' ? 'P' : rec?.status==='absent' ? 'A' : '';
+                    row.push(s);
+                    if (s==='P') { totalPresent++; isMale ? boysPT++ : girlsPT++; }
+                    if (s==='A') { totalAbsent++;  isMale ? boysAT++ : girlsAT++; }
                 }
                 row.push(totalPresent, totalAbsent, prevMonthPresent, totalPresent + prevMonthPresent);
                 data.push(row);
             }
 
+            // ── Monthly Summary rows (appended after last student row) ──
+            const boysPerc  = boysCount>0 && workingDays>0
+                ? ((boysPT  / (boysCount  * workingDays)) * 100).toFixed(2) + '%' : '0%';
+            const girlsPerc = girlsCount>0 && workingDays>0
+                ? ((girlsPT / (girlsCount * workingDays)) * 100).toFixed(2) + '%' : '0%';
+
+            data.push([]); // spacer
+            data.push(['MONTHLY SUMMARY']);
+            data.push(['', 'Total Boys Present',  '', boysPT]);
+            data.push(['', 'Total Boys Absent',   '', boysAT]);
+            data.push(['', 'Total Girls Present', '', girlsPT]);
+            data.push(['', 'Total Girls Absent',  '', girlsAT]);
+            data.push(['', 'Combine Present',     '', boysPT + girlsPT]);
+            data.push(['', 'Combine Absent',      '', boysAT + girlsAT]);
+            data.push([]);
+            data.push(['', 'Boys Attendance %',   '', boysPerc,  '', `(Working Days: ${workingDays})`]);
+            data.push(['', 'Girls Attendance %',  '', girlsPerc, '', `(Working Days: ${workingDays})`]);
+
             const ws = XLSX.utils.aoa_to_sheet(data);
 
-            // Style the working-days cell (row index 1, col 0) — orange bold text
-            const wdCellAddr = XLSX.utils.encode_cell({r:1, c:0});
-            if (!ws[wdCellAddr]) ws[wdCellAddr] = { t:'s', v: wdRow[0] };
-            ws[wdCellAddr].s = {
-                font:  { bold: true, color: { rgb: 'EA580C' }, sz: 12 },
-                fill:  { fgColor: { rgb: 'FFF7ED' } },
-                alignment: { horizontal: 'left' }
-            };
+            // ── Apply cell styles ────────────────────────────────────────
+            // Working days row (row index 1)
+            const wdAddr = XLSX.utils.encode_cell({r:1, c:0});
+            if (ws[wdAddr]) ws[wdAddr].s = { font:{bold:true, color:{rgb:'EA580C'}, sz:12}, fill:{fgColor:{rgb:'FFF7ED'}}, alignment:{horizontal:'left'} };
 
-            ws['!cols'] = [{wch:10},{wch:30},{wch:12},...Array(daysInMonth).fill({wch:4}),{wch:14},{wch:14},{wch:22},{wch:16}];
+            // "MONTHLY SUMMARY" heading row
+            const summaryStartRow = 4 + students.length + 1; // 4 header rows + students + 1 spacer
+            const summaryHeadAddr = XLSX.utils.encode_cell({r: summaryStartRow, c:0});
+            if (ws[summaryHeadAddr]) ws[summaryHeadAddr].s = { font:{bold:true, sz:13, color:{rgb:'1D4ED8'}}, fill:{fgColor:{rgb:'EFF6FF'}} };
+
+            // Colour the value cells of summary rows
+            const summaryValueRows = [
+                { r: summaryStartRow+1, color:'1D4ED8', bg:'EFF6FF' }, // Boys Present  — blue
+                { r: summaryStartRow+2, color:'DC2626', bg:'FEF2F2' }, // Boys Absent   — red
+                { r: summaryStartRow+3, color:'BE185D', bg:'FDF2F8' }, // Girls Present — pink
+                { r: summaryStartRow+4, color:'DC2626', bg:'FEF2F2' }, // Girls Absent  — red
+                { r: summaryStartRow+5, color:'059669', bg:'ECFDF5' }, // Combine P     — green
+                { r: summaryStartRow+6, color:'DC2626', bg:'FEF2F2' }, // Combine A     — red
+            ];
+            summaryValueRows.forEach(({r, color, bg}) => {
+                // Label col
+                const lAddr = XLSX.utils.encode_cell({r, c:1});
+                if (ws[lAddr]) ws[lAddr].s = { font:{bold:true, color:{rgb:'374151'}}, fill:{fgColor:{rgb:bg}} };
+                // Value col
+                const vAddr = XLSX.utils.encode_cell({r, c:3});
+                if (ws[vAddr]) ws[vAddr].s = { font:{bold:true, sz:12, color:{rgb:color}}, fill:{fgColor:{rgb:bg}}, alignment:{horizontal:'center'} };
+            });
+            // % rows
+            [summaryStartRow+8, summaryStartRow+9].forEach((r, i) => {
+                const lAddr = XLSX.utils.encode_cell({r, c:1});
+                const vAddr = XLSX.utils.encode_cell({r, c:3});
+                const col = i===0 ? '1D4ED8' : 'BE185D';
+                if (ws[lAddr]) ws[lAddr].s = { font:{bold:true, color:{rgb:'374151'}} };
+                if (ws[vAddr]) ws[vAddr].s = { font:{bold:true, sz:12, color:{rgb:col}}, alignment:{horizontal:'center'} };
+            });
+
+            ws['!cols'] = [{wch:10},{wch:28},{wch:12},...Array(daysInMonth).fill({wch:4}),{wch:14},{wch:14},{wch:22},{wch:16}];
             const wb = XLSX.utils.book_new();
             const sheetName = (classTitle ? classTitle.replace(/\s*-\s*/g,'_') : 'Attendance').substring(0,31);
             XLSX.utils.book_append_sheet(wb, ws, sheetName);
@@ -2594,6 +2676,25 @@
 
                 doc.setTextColor(0, 0, 0); // reset
 
+                // ── Build while accumulating summary totals ─────────────
+                let boysPT=0, boysAT=0, girlsPT=0, girlsAT=0;
+                const boysCount  = students.filter(s => s.gender.toLowerCase()==='male').length;
+                const girlsCount = students.filter(s => s.gender.toLowerCase()!=='male').length;
+                // Re-scan tableData (already built) to extract gender totals
+                for (let student of students) {
+                    const isMale = student.gender.toLowerCase() === 'male';
+                    for (let day = 1; day <= daysInMonth; day++) {
+                        const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                        const rec = thisMonthMap.get(`${dateStr}_${student.id}`);
+                        if (rec?.status==='present') isMale ? boysPT++ : girlsPT++;
+                        if (rec?.status==='absent')  isMale ? boysAT++ : girlsAT++;
+                    }
+                }
+                const boysPerc  = boysCount>0 && workingDays>0
+                    ? ((boysPT  / (boysCount  * workingDays)) * 100).toFixed(2) : '0';
+                const girlsPerc = girlsCount>0 && workingDays>0
+                    ? ((girlsPT / (girlsCount * workingDays)) * 100).toFixed(2) : '0';
+
                 doc.autoTable({
                     head: headers, body: tableData, startY: 22, theme: 'grid',
                     styles: { fontSize:7, cellPadding:1, halign:'center', valign:'middle' },
@@ -2607,6 +2708,80 @@
                         if (c === total-1) { data.cell.styles.fillColor=[219,234,254]; data.cell.styles.textColor=[59,130,246]; data.cell.styles.fontStyle='bold'; }
                     }
                 });
+
+                // ── Monthly Summary section below the table ──────────────
+                const afterTableY = doc.lastAutoTable.finalY + 10;
+                const pageH = doc.internal.pageSize.getHeight();
+
+                // If summary would overflow the page, add a new page
+                const summaryHeight = 58;
+                const startY = afterTableY + summaryHeight > pageH - 10
+                    ? (doc.addPage(), 20)
+                    : afterTableY;
+
+                // ── Section heading ──────────────────────────────────────
+                doc.setFillColor(29, 78, 216);           // blue-700
+                doc.roundedRect(14, startY - 4, 90, 9, 2, 2, 'F');
+                doc.setFontSize(9); doc.setFont('helvetica','bold'); doc.setTextColor(255,255,255);
+                doc.text('MONTHLY SUMMARY', 18, startY + 2.5);
+
+                // ── Working days note right-aligned ──────────────────────
+                doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(107,114,128);
+                const wdNote = `Working Days: ${workingDays}`;
+                doc.text(wdNote, pageW - 14 - doc.getTextWidth(wdNote), startY + 2.5);
+
+                // ── Summary grid: 3 columns × 2 rows ────────────────────
+                const colW = (pageW - 28) / 3;
+                const rows = [
+                    [
+                        { label:'Total Boys Present',  value: boysPT,           color:[29,78,216],   bg:[239,246,255] },
+                        { label:'Total Boys Absent',   value: boysAT,           color:[220,38,38],   bg:[254,242,242] },
+                        { label:'Boys Attendance %',   value: boysPerc + '%',   color:[22,163,74],   bg:[240,253,244] },
+                    ],
+                    [
+                        { label:'Total Girls Present', value: girlsPT,          color:[190,24,93],   bg:[253,242,248] },
+                        { label:'Total Girls Absent',  value: girlsAT,          color:[220,38,38],   bg:[254,242,242] },
+                        { label:'Girls Attendance %',  value: girlsPerc + '%',  color:[22,163,74],   bg:[240,253,244] },
+                    ],
+                ];
+
+                const cellH = 18, gapX = 3, gapY = 4;
+                rows.forEach((cols, rowIdx) => {
+                    cols.forEach((cell, colIdx) => {
+                        const x = 14 + colIdx * (colW + gapX);
+                        const y = startY + 8 + rowIdx * (cellH + gapY);
+                        // Card background
+                        doc.setFillColor(...cell.bg);
+                        doc.roundedRect(x, y, colW, cellH, 2, 2, 'F');
+                        // Left accent bar
+                        doc.setFillColor(...cell.color);
+                        doc.roundedRect(x, y, 3, cellH, 1, 1, 'F');
+                        // Label
+                        doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.setTextColor(75,85,99);
+                        doc.text(cell.label, x + 7, y + 5.5);
+                        // Value
+                        doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(...cell.color);
+                        doc.text(String(cell.value), x + 7, y + 14);
+                    });
+                });
+
+                // ── Combine row (full-width split) ───────────────────────
+                const combineY = startY + 8 + 2 * (cellH + gapY) + 2;
+                const halfW = (pageW - 28 - gapX) / 2;
+                [
+                    { label:'Combine Present', value: boysPT+girlsPT, color:[22,163,74],  bg:[240,253,244], x:14 },
+                    { label:'Combine Absent',  value: boysAT+girlsAT, color:[220,38,38],  bg:[254,242,242], x:14+halfW+gapX },
+                ].forEach(cell => {
+                    doc.setFillColor(...cell.bg);
+                    doc.roundedRect(cell.x, combineY, halfW, cellH, 2, 2, 'F');
+                    doc.setFillColor(...cell.color);
+                    doc.roundedRect(cell.x, combineY, 3, cellH, 1, 1, 'F');
+                    doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.setTextColor(75,85,99);
+                    doc.text(cell.label, cell.x+7, combineY+5.5);
+                    doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(...cell.color);
+                    doc.text(String(cell.value), cell.x+7, combineY+14);
+                });
+
                 doc.save((classTitle ? `Attendance_${classTitle.replace(/\s+/g,'_')}_${cm}` : `Attendance_${cm}`) + '.pdf');
             } catch (err) { console.error(err); alert('Error: ' + err.message + '\n\nPlease refresh and try again.'); }
         }
