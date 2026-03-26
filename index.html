@@ -111,23 +111,66 @@
             justify-content: center;
         }
         
+        /* ── DATE BAR (always visible) ──────────────────────────── */
         .daily-date-section {
-            padding: 16px 20px 0;
+            padding: 14px 20px 14px;
             background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
         }
-        
-        .daily-date-input {
-            width: 100%;
-            padding: 14px 18px;
-            border: none;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: 600;
-            text-align: center;
-            font-family: 'Poppins', sans-serif;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        .date-bar {
+            display: flex;
+            align-items: center;
             background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 0 4px 0 18px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+            gap: 0;
+            min-height: 52px;
+        }
+        .date-bar-text {
+            flex: 1;
+            font-family: 'Poppins', sans-serif;
+            font-size: 17px;
+            font-weight: 700;
             color: var(--text-primary);
+            letter-spacing: 0.5px;
+            user-select: none;
+        }
+        .date-bar-icon {
+            width: 44px; height: 44px;
+            border-radius: 10px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            color: #2196F3;
+            font-size: 20px;
+            transition: background 0.18s, color 0.18s;
+            flex-shrink: 0;
+        }
+        .date-bar-icon:hover { background: rgba(33,150,243,0.12); }
+        .date-bar-icon.cal-open { background: #2196F3; color: #fff; border-radius: 10px; }
+        [data-theme="light"] .date-bar-icon { color: #1976D2; }
+        [data-theme="light"] .date-bar-icon.cal-open { background: #1976D2; color: #fff; }
+
+        /* ── COLLAPSIBLE CALENDAR ──────────────────────────────── */
+        .cal-wrapper {
+            overflow: hidden;
+            max-height: 0;
+            transition: max-height 0.38s cubic-bezier(0.4, 0, 0.2, 1),
+                        opacity 0.28s ease,
+                        padding 0.28s ease;
+            opacity: 0;
+            padding: 0 20px;
+            background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+        }
+        .cal-wrapper.cal-expanded {
+            max-height: 520px;
+            opacity: 1;
+            padding: 0 20px 14px;
+        }
+
+        .daily-date-input {
+            display: none;
         }
         
         .daily-stats-section {
@@ -870,6 +913,169 @@
             border-left: 3px solid #6366f1;
         }
 
+        /* ══════════════════════════════════════════
+           CUSTOM CALENDAR — attendance dot indicator
+           ══════════════════════════════════════════ */
+        .cal-wrapper {
+            padding: 12px 20px 0;
+            background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+        }
+        .cal-card {
+            background: var(--bg-secondary);
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 6px 24px rgba(0,0,0,0.22);
+        }
+        .cal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px 10px;
+            border-bottom: 1px solid var(--bg-tertiary);
+        }
+        .cal-nav {
+            width: 36px; height: 36px;
+            border: none; border-radius: 50%;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: 18px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.2s, transform 0.15s;
+        }
+        .cal-nav:hover { background: #2196F3; color: #fff; transform: scale(1.1); }
+        .cal-month-label {
+            font-family: 'Poppins', sans-serif;
+            font-size: 15px; font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: 0.5px;
+        }
+        .cal-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 0;
+        }
+        .cal-dow {
+            text-align: center;
+            font-size: 10px; font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 8px 0 4px;
+            color: var(--text-secondary);
+        }
+        .cal-dow.sunday { color: #f87171; }
+        .cal-day {
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            padding: 4px 2px 4px;
+            cursor: pointer;
+            border-radius: 10px;
+            margin: 2px;
+            min-height: 48px;
+            position: relative;
+            transition: background 0.18s;
+        }
+        .cal-day:hover:not(.cal-empty):not(.cal-other) { background: rgba(255,255,255,0.06); }
+        [data-theme="light"] .cal-day:hover:not(.cal-empty):not(.cal-other) { background: rgba(0,0,0,0.05); }
+        .cal-day.cal-empty { cursor: default; }
+        .cal-day.cal-other { opacity: 0; pointer-events: none; }
+
+        /* ── Date number bubble ──────────────────────────────── */
+        .cal-day-num {
+            font-family: 'Poppins', sans-serif;
+            font-size: 13px; font-weight: 700;
+            color: var(--text-primary);
+            width: 30px; height: 30px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 50%;
+            transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+            position: relative; z-index: 1;
+        }
+
+        /* Sunday — red text, no fill */
+        .cal-day.cal-sunday .cal-day-num { color: #f87171; }
+        [data-theme="light"] .cal-day.cal-sunday .cal-day-num { color: #dc2626; }
+
+        /* Today — solid blue circle */
+        .cal-day.cal-today .cal-day-num {
+            background: #2196F3;
+            color: #fff;
+            box-shadow: 0 0 0 3px rgba(33,150,243,0.28);
+        }
+
+        /* Selected — double ring (white inner, blue outer) */
+        .cal-day.cal-selected .cal-day-num {
+            box-shadow: 0 0 0 2.5px #fff, 0 0 0 4.5px #2196F3;
+        }
+        [data-theme="light"] .cal-day.cal-selected .cal-day-num {
+            box-shadow: 0 0 0 2px #2196F3, 0 0 0 4px rgba(33,150,243,0.22);
+        }
+        .cal-day.cal-today.cal-selected .cal-day-num {
+            background: #2196F3; color: #fff;
+            box-shadow: 0 0 0 2.5px #fff, 0 0 0 5px #2196F3;
+        }
+
+        /* ── Attendance circular fills behind date number ────── */
+        .cal-day-num.circle-present {
+            background: #10b981; color: #fff;
+        }
+        [data-theme="light"] .cal-day-num.circle-present {
+            background: #059669; color: #fff;
+        }
+        .cal-day-num.circle-absent {
+            background: #ef4444; color: #fff;
+        }
+        [data-theme="light"] .cal-day-num.circle-absent {
+            background: #dc2626; color: #fff;
+        }
+        .cal-day-num.circle-partial {
+            background: #f59e0b; color: #fff;
+        }
+        [data-theme="light"] .cal-day-num.circle-partial {
+            background: #d97706; color: #fff;
+        }
+
+        /* Holiday: soft indigo tint */
+        .cal-day.cal-holiday .cal-day-num {
+            background: rgba(99,102,241,0.22);
+            color: #a5b4fc;
+        }
+        [data-theme="light"] .cal-day.cal-holiday .cal-day-num {
+            background: rgba(99,102,241,0.14);
+            color: #4f46e5;
+        }
+
+        /* Today takes attendance colour (not plain blue) when marked */
+        .cal-day.cal-today .cal-day-num.circle-present { background: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,0.32); }
+        .cal-day.cal-today .cal-day-num.circle-absent  { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.32);  }
+        .cal-day.cal-today .cal-day-num.circle-partial { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,0.32); }
+        [data-theme="light"] .cal-day.cal-today .cal-day-num.circle-present { background: #059669; }
+        [data-theme="light"] .cal-day.cal-today .cal-day-num.circle-absent  { background: #dc2626; }
+        [data-theme="light"] .cal-day.cal-today .cal-day-num.circle-partial { background: #d97706; }
+
+        /* ── Legend circles ──────────────────────────────────── */
+        .cal-dot {
+            width: 14px; height: 14px; border-radius: 50%;
+            flex-shrink: 0; display: inline-block;
+        }
+        .cal-dot.dot-present { background: #10b981; }
+        .cal-dot.dot-absent  { background: #ef4444; }
+        .cal-dot.dot-partial { background: #f59e0b; }
+        .cal-dot.dot-holiday { background: rgba(99,102,241,0.35); border: 1.5px solid #818cf8; }
+        [data-theme="light"] .cal-dot.dot-present { background: #059669; }
+        [data-theme="light"] .cal-dot.dot-absent  { background: #dc2626; }
+        [data-theme="light"] .cal-dot.dot-partial { background: #d97706; }
+        [data-theme="light"] .cal-dot.dot-holiday { background: rgba(99,102,241,0.15); border: 1.5px solid #6366f1; }
+
+        .cal-legend {
+            display: flex; gap: 12px; flex-wrap: wrap;
+            padding: 8px 14px 10px;
+            border-top: 1px solid var(--bg-tertiary);
+            font-size: 11px; font-weight: 600;
+            color: var(--text-secondary);
+            align-items: center;
+        }
+        .cal-legend-item { display: flex; align-items: center; gap: 5px; }
+
         /* HOLIDAY BANNER - Daily tab */
         .holiday-banner {
             margin: 0 20px 16px;
@@ -910,8 +1116,51 @@
             </button>
         </div>
 
+        <!-- Hidden native input keeps compatibility with existing JS references -->
+        <input type="date" id="daily-date" style="display:none;" onchange="loadDailyAttendance()">
+
+        <!-- DATE BAR — always visible, shows today's date + toggle button -->
         <div class="daily-date-section">
-            <input type="date" id="daily-date" class="daily-date-input" onchange="loadDailyAttendance()">
+            <div class="date-bar">
+                <span class="date-bar-text" id="date-bar-label">Loading…</span>
+                <button class="date-bar-icon" id="cal-toggle-btn" onclick="toggleCalendar()" title="Open calendar">
+                    <i class="fas fa-calendar-alt"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- COLLAPSIBLE CALENDAR -->
+        <div class="cal-wrapper" id="cal-wrapper">
+            <div class="cal-card">
+                <!-- Month navigation -->
+                <div class="cal-header">
+                    <button class="cal-nav" onclick="calNavigate(-1)" title="Previous month">&#8249;</button>
+                    <div class="cal-month-label" id="cal-month-label">— —</div>
+                    <button class="cal-nav" onclick="calNavigate(1)" title="Next month">&#8250;</button>
+                </div>
+
+                <!-- Day-of-week headers -->
+                <div class="cal-grid" id="cal-dow-row">
+                    <div class="cal-dow sunday">Sun</div>
+                    <div class="cal-dow">Mon</div>
+                    <div class="cal-dow">Tue</div>
+                    <div class="cal-dow">Wed</div>
+                    <div class="cal-dow">Thu</div>
+                    <div class="cal-dow">Fri</div>
+                    <div class="cal-dow">Sat</div>
+                </div>
+
+                <!-- Day cells injected by JS -->
+                <div class="cal-grid" id="cal-days-grid"></div>
+
+                <!-- Legend -->
+                <div class="cal-legend">
+                    <div class="cal-legend-item"><span class="cal-dot dot-present"></span> All Present</div>
+                    <div class="cal-legend-item"><span class="cal-dot dot-absent"></span> Some Absent</div>
+                    <div class="cal-legend-item"><span class="cal-dot dot-partial"></span> Mixed</div>
+                    <div class="cal-legend-item"><span class="cal-dot dot-holiday"></span> Holiday</div>
+                </div>
+            </div>
         </div>
 
         <div class="daily-stats-section">
@@ -1411,6 +1660,8 @@
         document.addEventListener('DOMContentLoaded', async function() {
             document.getElementById('daily-date').value = currentDate;
             document.getElementById('attendance-month').value = currentMonth;
+            // Set date bar label on startup
+            updateDateBarLabel(currentDate);
 
             const savedTheme = localStorage.getItem('theme') || 'dark';
             if (savedTheme === 'light') {
@@ -1436,6 +1687,7 @@
             document.getElementById('summary-to-month').value   = String(new Date().getMonth() + 1);
 
             loadDailyAttendance();
+            renderCustomCalendar();
         });
 
         function saveClassSection() {
@@ -1484,7 +1736,7 @@
             document.getElementById('tab-' + tabName).classList.add('active');
             event.currentTarget.classList.add('active');
             document.getElementById('main-theme-toggle').style.display = tabName === 'daily' ? 'none' : 'flex';
-            if (tabName === 'daily')   loadDailyAttendance();
+            if (tabName === 'daily')   { closeCalendar(); loadDailyAttendance(); }
             if (tabName === 'monthly') loadMonthlyAttendance();
             if (tabName === 'setup')   renderStudentManagerList();
             if (tabName === 'summary') loadYearlySummary();
@@ -1523,10 +1775,171 @@
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // DAILY ATTENDANCE — uses batch fetch + studentId
+        // CUSTOM CALENDAR — dot indicators for attendance status
         // ═══════════════════════════════════════════════════════════════
+        let calYear  = new Date().getFullYear();
+        let calMonth = new Date().getMonth(); // 0-indexed
+        let calIsOpen = false;
+
+        // Format date string as "25 Mar 2026 (Wed)"
+        function formatDateBarLabel(dateStr) {
+            if (!dateStr) return '';
+            const d = new Date(dateStr + 'T00:00:00');
+            const days  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()} (${days[d.getDay()]})`;
+        }
+
+        function updateDateBarLabel(dateStr) {
+            const el = document.getElementById('date-bar-label');
+            if (el) el.textContent = formatDateBarLabel(dateStr || currentDate);
+        }
+
+        function toggleCalendar() {
+            calIsOpen = !calIsOpen;
+            const wrapper = document.getElementById('cal-wrapper');
+            const btn     = document.getElementById('cal-toggle-btn');
+            if (!wrapper || !btn) return;
+            if (calIsOpen) {
+                wrapper.classList.add('cal-expanded');
+                btn.classList.add('cal-open');
+                btn.title = 'Close calendar';
+                renderCustomCalendar();
+            } else {
+                wrapper.classList.remove('cal-expanded');
+                btn.classList.remove('cal-open');
+                btn.title = 'Open calendar';
+            }
+        }
+
+        function closeCalendar() {
+            if (!calIsOpen) return;
+            calIsOpen = false;
+            const wrapper = document.getElementById('cal-wrapper');
+            const btn     = document.getElementById('cal-toggle-btn');
+            if (wrapper) wrapper.classList.remove('cal-expanded');
+            if (btn) { btn.classList.remove('cal-open'); btn.title = 'Open calendar'; }
+        }
+
+        const CAL_MONTH_NAMES = ['January','February','March','April','May','June',
+                                  'July','August','September','October','November','December'];
+
+        async function renderCustomCalendar() {
+            // Update hidden native input to keep currentDate in sync
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('cal-month-label').textContent =
+                `${CAL_MONTH_NAMES[calMonth]} ${calYear}`;
+
+            const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+            const firstDow    = new Date(calYear, calMonth, 1).getDay(); // 0=Sun
+
+            // ── Batch fetch: attendance dots for this month ──────────────
+            const monthStr     = `${calYear}-${String(calMonth + 1).padStart(2,'0')}`;
+            const monthMap     = await fetchMonthAttendanceMap(calYear, calMonth + 1);
+            const allStudents  = await db.students.toArray();
+            const totalStudents = allStudents.length;
+
+            // Holiday / Sunday sets for this month
+            const holidays     = await getHolidaysForMonth(calYear, calMonth + 1);
+            const holidaySet   = new Set(holidays.map(h => h.date));
+            const sundaySet    = new Set(getSundayDates(calYear, calMonth + 1));
+            const autoExcSun   = document.getElementById('auto-sundays')?.checked !== false;
+
+            // Build dot map: dateStr → dot-class
+            const dotMap = {};
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dateStr = `${monthStr}-${String(d).padStart(2,'0')}`;
+
+                if (holidaySet.has(dateStr) || (sundaySet.has(dateStr) && autoExcSun)) {
+                    dotMap[dateStr] = 'holiday';
+                    continue;
+                }
+
+                // Count present / absent for this date
+                let presentCount = 0, absentCount = 0;
+                allStudents.forEach(s => {
+                    const rec = monthMap.get(`${dateStr}_${s.id}`);
+                    if (rec?.status === 'present') presentCount++;
+                    else if (rec?.status === 'absent') absentCount++;
+                });
+
+                const totalMarked = presentCount + absentCount;
+                if (totalMarked === 0) continue; // no dot
+
+                if (absentCount === 0) dotMap[dateStr] = 'present';          // all present → green
+                else if (presentCount === 0) dotMap[dateStr] = 'absent';     // all absent → red
+                else dotMap[dateStr] = 'partial';                            // mixed → yellow
+            }
+
+            // ── Render day cells ─────────────────────────────────────────
+            const grid = document.getElementById('cal-days-grid');
+            let html = '';
+
+            // Leading empty cells
+            for (let i = 0; i < firstDow; i++) {
+                html += `<div class="cal-day cal-empty"></div>`;
+            }
+
+            const todayStr    = today;
+            const selectedStr = currentDate;
+
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dateStr = `${monthStr}-${String(d).padStart(2,'0')}`;
+                const dow     = new Date(calYear, calMonth, d).getDay();
+                const isSun   = dow === 0;
+                const isToday = dateStr === todayStr;
+                const isSel   = dateStr === selectedStr;
+                const isHol   = holidaySet.has(dateStr) || (sundaySet.has(dateStr) && autoExcSun);
+
+                let cls = 'cal-day';
+                if (isSun)  cls += ' cal-sunday';
+                if (isToday) cls += ' cal-today';
+                if (isSel)   cls += ' cal-selected';
+                if (isHol)   cls += ' cal-holiday';
+
+                // Dot
+                // Apply attendance circle class directly to the number bubble
+                const dotType = dotMap[dateStr];
+                const circleClass = dotType ? ` circle-${dotType}` : '';
+
+                html += `<div class="${cls}" onclick="calSelectDate('${dateStr}')">
+                    <span class="cal-day-num${circleClass}">${d}</span>
+                </div>`;
+            }
+
+            grid.innerHTML = html;
+        }
+
+        function calNavigate(dir) {
+            calMonth += dir;
+            if (calMonth > 11) { calMonth = 0; calYear++; }
+            if (calMonth < 0)  { calMonth = 11; calYear--; }
+            renderCustomCalendar();
+        }
+
+        async function calSelectDate(dateStr) {
+            currentDate = dateStr;
+            document.getElementById('daily-date').value = dateStr;
+            // Sync calYear/calMonth to selected date
+            const [y, m] = dateStr.split('-').map(Number);
+            calYear  = y;
+            calMonth = m - 1;
+            // Update date bar label immediately
+            updateDateBarLabel(dateStr);
+            // Close calendar after selection
+            closeCalendar();
+            await loadDailyAttendance();
+        }
+
+        // Called after any attendance change to refresh dots without full reload
+        async function refreshCalendarDots() {
+            renderCustomCalendar(); // lightweight — just redraws the grid
+        }
+
         async function loadDailyAttendance() {
             currentDate = document.getElementById('daily-date').value;
+            // Always keep the date bar in sync
+            updateDateBarLabel(currentDate);
             const students = getSortedStudents(await db.students.toArray());
             const listContainer = document.getElementById('student-list');
 
@@ -1623,6 +2036,7 @@
                 card.querySelector('.absent-btn').classList.toggle('active', status === 'absent');
             }
             updateDailyStatsFromDOM();
+            refreshCalendarDots();
         }
 
         async function saveRemark(studentId, remark) {
@@ -1647,6 +2061,7 @@
                 }
             }
             updateDailyStatsFromDOM();
+            refreshCalendarDots();
         }
 
         async function clearAllToday() {
@@ -1654,6 +2069,7 @@
             const students = await db.students.toArray();
             for (let student of students) await deleteAttendanceRecord(currentDate, student.id);
             loadDailyAttendance();
+            renderCustomCalendar();
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -2046,6 +2462,18 @@
         // ═══════════════════════════════════════════════════════════════
         // EXPORT EXCEL — batch query
         // ═══════════════════════════════════════════════════════════════
+        // ── Shared helper: calculate working days for a given month ──
+        async function getWorkingDaysForMonth(year, month) {
+            const daysInMonth = new Date(year, month, 0).getDate();
+            const manualHolidays = await getHolidaysForMonth(year, month);
+            const manualHolDates = new Set(manualHolidays.map(h => h.date));
+            const sundayDates    = getSundayDates(year, month);
+            const autoExcSun     = document.getElementById('auto-sundays')?.checked !== false;
+            let excluded = manualHolidays.length;
+            if (autoExcSun) sundayDates.forEach(d => { if (!manualHolDates.has(d)) excluded++; });
+            return daysInMonth - excluded;
+        }
+
         async function exportExcel() {
             const cm = document.getElementById('attendance-month').value;
             const [year, month] = cm.split('-').map(Number);
@@ -2055,15 +2483,22 @@
 
             // Prev month info
             let pY = year, pM = month - 1; if (pM === 0) { pM = 12; pY--; }
-            const prevMonthMap = await fetchMonthAttendanceMap(pY, pM);
-            const thisMonthMap = await fetchMonthAttendanceMap(year, month);
+            const prevMonthMap  = await fetchMonthAttendanceMap(pY, pM);
+            const thisMonthMap  = await fetchMonthAttendanceMap(year, month);
+            const workingDays   = await getWorkingDaysForMonth(year, month);
 
+            // Row 1 — Report title
+            const titleRow = [(classTitle ? `Attendance Report - ${classTitle}` : 'Attendance Report') + ` | Month: ${cm}`];
+            // Row 2 — Working days info
+            const wdRow = [`Working Days of this month = ${workingDays}`];
+            // Row 3 — blank spacer
+            const spacerRow = [];
+            // Row 4 — column headers
             const headerRow = ['Roll No','Student Name','Gender'];
             for (let d = 1; d <= daysInMonth; d++) headerRow.push(d);
             headerRow.push('Total Present','Total Absent','Previous Month Present','Combine Present');
 
-            const titleRow = [(classTitle ? `Attendance Report - ${classTitle}` : 'Attendance Report') + ` | Month: ${cm}`];
-            const data = [titleRow, headerRow];
+            const data = [titleRow, wdRow, spacerRow, headerRow];
 
             for (let student of students) {
                 let prevMonthPresent = 0;
@@ -2082,6 +2517,16 @@
             }
 
             const ws = XLSX.utils.aoa_to_sheet(data);
+
+            // Style the working-days cell (row index 1, col 0) — orange bold text
+            const wdCellAddr = XLSX.utils.encode_cell({r:1, c:0});
+            if (!ws[wdCellAddr]) ws[wdCellAddr] = { t:'s', v: wdRow[0] };
+            ws[wdCellAddr].s = {
+                font:  { bold: true, color: { rgb: 'EA580C' }, sz: 12 },
+                fill:  { fgColor: { rgb: 'FFF7ED' } },
+                alignment: { horizontal: 'left' }
+            };
+
             ws['!cols'] = [{wch:10},{wch:30},{wch:12},...Array(daysInMonth).fill({wch:4}),{wch:14},{wch:14},{wch:22},{wch:16}];
             const wb = XLSX.utils.book_new();
             const sheetName = (classTitle ? classTitle.replace(/\s*-\s*/g,'_') : 'Attendance').substring(0,31);
@@ -2126,12 +2571,31 @@
                 }
 
                 const headers = [['Roll No','Student Name','Gender',...Array.from({length:daysInMonth},(_,i)=>String(i+1)),'Total Present','Total Absent','Prev Month Present','Combine Present']];
-                const classTitle = getClassTitle();
-                doc.setFontSize(16); doc.setFont('helvetica','bold');
-                doc.text((classTitle ? `Attendance Report - ${classTitle} | ` : 'Attendance Report | ') + cm, 14, 15);
+                const classTitle  = getClassTitle();
+                const workingDays = await getWorkingDaysForMonth(year, month);
+
+                // ── Title line
+                doc.setFontSize(14); doc.setFont('helvetica','bold');
+                doc.setTextColor(15, 23, 42);
+                doc.text((classTitle ? `Attendance Report - ${classTitle} | ` : 'Attendance Report | ') + cm, 14, 14);
+
+                // ── Working Days badge — right-aligned on same line
+                const pageW = doc.internal.pageSize.getWidth();
+                const wdText = `Working Days of this month = ${workingDays}`;
+                doc.setFontSize(10); doc.setFont('helvetica','bold');
+                doc.setTextColor(234, 88, 12); // orange
+                const wdTextW = doc.getTextWidth(wdText);
+                doc.text(wdText, pageW - 14 - wdTextW, 14);
+
+                // ── Thin separator line
+                doc.setDrawColor(200, 200, 200);
+                doc.setLineWidth(0.3);
+                doc.line(14, 18, pageW - 14, 18);
+
+                doc.setTextColor(0, 0, 0); // reset
 
                 doc.autoTable({
-                    head: headers, body: tableData, startY: 25, theme: 'grid',
+                    head: headers, body: tableData, startY: 22, theme: 'grid',
                     styles: { fontSize:7, cellPadding:1, halign:'center', valign:'middle' },
                     headStyles: { fillColor:[59,130,246], fontStyle:'bold', fontSize:7, halign:'center' },
                     columnStyles: { 0:{cellWidth:12,halign:'center'}, 1:{cellWidth:35,halign:'left'}, 2:{cellWidth:15,halign:'center'} },
