@@ -1387,6 +1387,43 @@
                     </p>
                 </div>
             </div>
+
+            <!-- ── NEW: Averages & Maximums ── -->
+            <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 16px; margin-top: 8px;">
+                <i class="fas fa-chart-bar"></i> Daily Averages &amp; Maximums
+            </h2>
+
+            <div class="summary-grid">
+                <div class="summary-card" style="background: linear-gradient(135deg,#0ea5e9,#0284c7); color:white;">
+                    <div class="summary-title">Avg Present Boys / Day</div>
+                    <div class="summary-value" id="avg-present-boys">0.00</div>
+                    <p style="font-size:12px;opacity:0.85;margin-top:6px;">Total Present Boys ÷ Working Days</p>
+                </div>
+                <div class="summary-card" style="background: linear-gradient(135deg,#ec4899,#be185d); color:white;">
+                    <div class="summary-title">Avg Present Girls / Day</div>
+                    <div class="summary-value" id="avg-present-girls">0.00</div>
+                    <p style="font-size:12px;opacity:0.85;margin-top:6px;">Total Present Girls ÷ Working Days</p>
+                </div>
+            </div>
+
+            <div class="summary-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+                <div class="summary-card" style="border-top: 4px solid #3b82f6;">
+                    <div class="summary-title" style="color:var(--text-secondary);">Max Present Boys (Single Day)</div>
+                    <div class="summary-value" style="background:linear-gradient(135deg,#3b82f6,#2563eb);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;" id="max-present-boys">0</div>
+                </div>
+                <div class="summary-card" style="border-top: 4px solid #ec4899;">
+                    <div class="summary-title" style="color:var(--text-secondary);">Max Present Girls (Single Day)</div>
+                    <div class="summary-value" style="background:linear-gradient(135deg,#ec4899,#be185d);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;" id="max-present-girls">0</div>
+                </div>
+                <div class="summary-card" style="border-top: 4px solid #ef4444;">
+                    <div class="summary-title" style="color:var(--text-secondary);">Max Absent Boys (Single Day)</div>
+                    <div class="summary-value" style="background:linear-gradient(135deg,#ef4444,#dc2626);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;" id="max-absent-boys">0</div>
+                </div>
+                <div class="summary-card" style="border-top: 4px solid #f97316;">
+                    <div class="summary-title" style="color:var(--text-secondary);">Max Absent Girls (Single Day)</div>
+                    <div class="summary-value" style="background:linear-gradient(135deg,#f97316,#ea580c);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;" id="max-absent-girls">0</div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -2450,22 +2487,30 @@
             const thisMonthMap = await fetchMonthAttendanceMap(year, month);
 
             let boysPT = 0, boysAT = 0, girlsPT = 0, girlsAT = 0;
+            let maxBoysP = 0, maxGirlsP = 0, maxBoysA = 0, maxGirlsA = 0;
             for (let day = 1; day <= daysInMonth; day++) {
                 const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                let dayBoysP = 0, dayGirlsP = 0, dayBoysA = 0, dayGirlsA = 0;
                 for (let student of students) {
                     const rec = thisMonthMap.get(`${dateStr}_${student.id}`);
                     if (student.gender.toLowerCase() === 'male') {
-                        if (rec?.status === 'present') boysPT++;
-                        if (rec?.status === 'absent')  boysAT++;
+                        if (rec?.status === 'present') { boysPT++; dayBoysP++; }
+                        if (rec?.status === 'absent')  { boysAT++; dayBoysA++; }
                     } else {
-                        if (rec?.status === 'present') girlsPT++;
-                        if (rec?.status === 'absent')  girlsAT++;
+                        if (rec?.status === 'present') { girlsPT++; dayGirlsP++; }
+                        if (rec?.status === 'absent')  { girlsAT++; dayGirlsA++; }
                     }
                 }
+                if (dayBoysP > maxBoysP)  maxBoysP  = dayBoysP;
+                if (dayGirlsP > maxGirlsP) maxGirlsP = dayGirlsP;
+                if (dayBoysA > maxBoysA)  maxBoysA  = dayBoysA;
+                if (dayGirlsA > maxGirlsA) maxGirlsA = dayGirlsA;
             }
 
             const boysPerc  = boysTotal  > 0 && workingDays > 0 ? ((boysPT  / (boysTotal  * workingDays)) * 100).toFixed(2) : 0;
             const girlsPerc = girlsTotal > 0 && workingDays > 0 ? ((girlsPT / (girlsTotal * workingDays)) * 100).toFixed(2) : 0;
+            const avgBoysP  = workingDays > 0 ? (boysPT  / workingDays).toFixed(2) : '0.00';
+            const avgGirlsP = workingDays > 0 ? (girlsPT / workingDays).toFixed(2) : '0.00';
 
             document.getElementById('total-present-boys').textContent    = boysPT;
             document.getElementById('total-absent-boys').textContent     = boysAT;
@@ -2475,6 +2520,12 @@
             document.getElementById('combine-absent-monthly').textContent  = boysAT + girlsAT;
             document.getElementById('boys-percentage').textContent  = boysPerc  + '%';
             document.getElementById('girls-percentage').textContent = girlsPerc + '%';
+            document.getElementById('avg-present-boys').textContent  = avgBoysP;
+            document.getElementById('avg-present-girls').textContent = avgGirlsP;
+            document.getElementById('max-present-boys').textContent  = maxBoysP;
+            document.getElementById('max-present-girls').textContent = maxGirlsP;
+            document.getElementById('max-absent-boys').textContent   = maxBoysA;
+            document.getElementById('max-absent-girls').textContent  = maxGirlsA;
         }
 
         async function saveSettings() {}
@@ -2517,8 +2568,25 @@
 
             // ── Build student rows & accumulate summary totals ──────────
             let boysPT=0, boysAT=0, girlsPT=0, girlsAT=0;
+            let maxBoysP=0, maxGirlsP=0, maxBoysA=0, maxGirlsA=0;
             const boysCount  = students.filter(s => s.gender.toLowerCase()==='male').length;
             const girlsCount = students.filter(s => s.gender.toLowerCase()!=='male').length;
+
+            // Per-day max tracking
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                let dBP=0, dGP=0, dBA=0, dGA=0;
+                for (let student of students) {
+                    const rec = thisMonthMap.get(`${dateStr}_${student.id}`);
+                    const isMale = student.gender.toLowerCase()==='male';
+                    if (rec?.status==='present') isMale ? dBP++ : dGP++;
+                    if (rec?.status==='absent')  isMale ? dBA++ : dGA++;
+                }
+                if (dBP>maxBoysP) maxBoysP=dBP;
+                if (dGP>maxGirlsP) maxGirlsP=dGP;
+                if (dBA>maxBoysA) maxBoysA=dBA;
+                if (dGA>maxGirlsA) maxGirlsA=dGA;
+            }
 
             for (let student of students) {
                 const isMale = student.gender.toLowerCase() === 'male';
@@ -2545,17 +2613,28 @@
             const girlsPerc = girlsCount>0 && workingDays>0
                 ? ((girlsPT / (girlsCount * workingDays)) * 100).toFixed(2) + '%' : '0%';
 
+            const avgBoysP  = workingDays>0 ? (boysPT  / workingDays).toFixed(2) : '0.00';
+            const avgGirlsP = workingDays>0 ? (girlsPT / workingDays).toFixed(2) : '0.00';
+
             data.push([]); // spacer
             data.push(['MONTHLY SUMMARY']);
-            data.push(['', 'Total Boys Present',  '', boysPT]);
-            data.push(['', 'Total Boys Absent',   '', boysAT]);
-            data.push(['', 'Total Girls Present', '', girlsPT]);
-            data.push(['', 'Total Girls Absent',  '', girlsAT]);
-            data.push(['', 'Combine Present',     '', boysPT + girlsPT]);
-            data.push(['', 'Combine Absent',      '', boysAT + girlsAT]);
+            data.push(['', 'Total Boys Present',           '', boysPT]);
+            data.push(['', 'Total Boys Absent',            '', boysAT]);
+            data.push(['', 'Total Girls Present',          '', girlsPT]);
+            data.push(['', 'Total Girls Absent',           '', girlsAT]);
+            data.push(['', 'Combine Present',              '', boysPT + girlsPT]);
+            data.push(['', 'Combine Absent',               '', boysAT + girlsAT]);
             data.push([]);
-            data.push(['', 'Boys Attendance %',   '', boysPerc,  '', `(Working Days: ${workingDays})`]);
-            data.push(['', 'Girls Attendance %',  '', girlsPerc, '', `(Working Days: ${workingDays})`]);
+            data.push(['', 'Boys Attendance %',            '', boysPerc,   '', `(Working Days: ${workingDays})`]);
+            data.push(['', 'Girls Attendance %',           '', girlsPerc,  '', `(Working Days: ${workingDays})`]);
+            data.push([]);
+            data.push(['', 'Avg Present Boys / Day',       '', avgBoysP,   '', `(Total Present Boys ÷ ${workingDays} working days)`]);
+            data.push(['', 'Avg Present Girls / Day',      '', avgGirlsP,  '', `(Total Present Girls ÷ ${workingDays} working days)`]);
+            data.push([]);
+            data.push(['', 'Max Present Boys (Single Day)',  '', maxBoysP]);
+            data.push(['', 'Max Present Girls (Single Day)', '', maxGirlsP]);
+            data.push(['', 'Max Absent Boys (Single Day)',   '', maxBoysA]);
+            data.push(['', 'Max Absent Girls (Single Day)',  '', maxGirlsA]);
 
             const ws = XLSX.utils.aoa_to_sheet(data);
 
@@ -2579,10 +2658,8 @@
                 { r: summaryStartRow+6, color:'DC2626', bg:'FEF2F2' }, // Combine A     — red
             ];
             summaryValueRows.forEach(({r, color, bg}) => {
-                // Label col
                 const lAddr = XLSX.utils.encode_cell({r, c:1});
                 if (ws[lAddr]) ws[lAddr].s = { font:{bold:true, color:{rgb:'374151'}}, fill:{fgColor:{rgb:bg}} };
-                // Value col
                 const vAddr = XLSX.utils.encode_cell({r, c:3});
                 if (ws[vAddr]) ws[vAddr].s = { font:{bold:true, sz:12, color:{rgb:color}}, fill:{fgColor:{rgb:bg}}, alignment:{horizontal:'center'} };
             });
@@ -2593,6 +2670,28 @@
                 const col = i===0 ? '1D4ED8' : 'BE185D';
                 if (ws[lAddr]) ws[lAddr].s = { font:{bold:true, color:{rgb:'374151'}} };
                 if (ws[vAddr]) ws[vAddr].s = { font:{bold:true, sz:12, color:{rgb:col}}, alignment:{horizontal:'center'} };
+            });
+            // Avg rows (rows 11 & 12 after summary heading)
+            [summaryStartRow+11, summaryStartRow+12].forEach((r, i) => {
+                const lAddr = XLSX.utils.encode_cell({r, c:1});
+                const vAddr = XLSX.utils.encode_cell({r, c:3});
+                const col = i===0 ? '0284C7' : 'BE185D';
+                if (ws[lAddr]) ws[lAddr].s = { font:{bold:true, color:{rgb:'374151'}}, fill:{fgColor:{rgb: i===0?'E0F2FE':'FDF2F8'}} };
+                if (ws[vAddr]) ws[vAddr].s = { font:{bold:true, sz:12, color:{rgb:col}}, fill:{fgColor:{rgb: i===0?'E0F2FE':'FDF2F8'}}, alignment:{horizontal:'center'} };
+            });
+            // Max rows (rows 14-17 after summary heading)
+            const maxRowColors = [
+                {col:'1D4ED8', bg:'EFF6FF'}, // Max Present Boys
+                {col:'BE185D', bg:'FDF2F8'}, // Max Present Girls
+                {col:'DC2626', bg:'FEF2F2'}, // Max Absent Boys
+                {col:'EA580C', bg:'FFF7ED'}, // Max Absent Girls
+            ];
+            maxRowColors.forEach(({col, bg}, i) => {
+                const r = summaryStartRow + 14 + i;
+                const lAddr = XLSX.utils.encode_cell({r, c:1});
+                const vAddr = XLSX.utils.encode_cell({r, c:3});
+                if (ws[lAddr]) ws[lAddr].s = { font:{bold:true, color:{rgb:'374151'}}, fill:{fgColor:{rgb:bg}} };
+                if (ws[vAddr]) ws[vAddr].s = { font:{bold:true, sz:12, color:{rgb:col}}, fill:{fgColor:{rgb:bg}}, alignment:{horizontal:'center'} };
             });
 
             ws['!cols'] = [{wch:10},{wch:28},{wch:12},...Array(daysInMonth).fill({wch:4}),{wch:14},{wch:14},{wch:22},{wch:16}];
@@ -2664,22 +2763,30 @@
 
                 // ── Build while accumulating summary totals ─────────────
                 let boysPT=0, boysAT=0, girlsPT=0, girlsAT=0;
+                let maxBoysP=0, maxGirlsP=0, maxBoysA=0, maxGirlsA=0;
                 const boysCount  = students.filter(s => s.gender.toLowerCase()==='male').length;
                 const girlsCount = students.filter(s => s.gender.toLowerCase()!=='male').length;
-                // Re-scan tableData (already built) to extract gender totals
-                for (let student of students) {
-                    const isMale = student.gender.toLowerCase() === 'male';
-                    for (let day = 1; day <= daysInMonth; day++) {
-                        const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                // Re-scan tableData (already built) to extract gender totals + per-day maxes
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                    let dBP=0, dGP=0, dBA=0, dGA=0;
+                    for (let student of students) {
+                        const isMale = student.gender.toLowerCase() === 'male';
                         const rec = thisMonthMap.get(`${dateStr}_${student.id}`);
-                        if (rec?.status==='present') isMale ? boysPT++ : girlsPT++;
-                        if (rec?.status==='absent')  isMale ? boysAT++ : girlsAT++;
+                        if (rec?.status==='present') { isMale ? (boysPT++, dBP++) : (girlsPT++, dGP++); }
+                        if (rec?.status==='absent')  { isMale ? (boysAT++, dBA++) : (girlsAT++, dGA++); }
                     }
+                    if (dBP>maxBoysP) maxBoysP=dBP;
+                    if (dGP>maxGirlsP) maxGirlsP=dGP;
+                    if (dBA>maxBoysA) maxBoysA=dBA;
+                    if (dGA>maxGirlsA) maxGirlsA=dGA;
                 }
                 const boysPerc  = boysCount>0 && workingDays>0
                     ? ((boysPT  / (boysCount  * workingDays)) * 100).toFixed(2) : '0';
                 const girlsPerc = girlsCount>0 && workingDays>0
                     ? ((girlsPT / (girlsCount * workingDays)) * 100).toFixed(2) : '0';
+                const avgBoysP  = workingDays>0 ? (boysPT  / workingDays).toFixed(2) : '0.00';
+                const avgGirlsP = workingDays>0 ? (girlsPT / workingDays).toFixed(2) : '0.00';
 
                 doc.autoTable({
                     head: headers, body: tableData, startY: 22, theme: 'grid',
@@ -2729,6 +2836,11 @@
                         { label:'Total Girls Absent',  value: girlsAT,          color:[220,38,38],   bg:[254,242,242] },
                         { label:'Girls Attendance %',  value: girlsPerc + '%',  color:[22,163,74],   bg:[240,253,244] },
                     ],
+                    [
+                        { label:'Avg Present Boys/Day',  value: avgBoysP,  color:[2,132,199],   bg:[224,242,254] },
+                        { label:'Avg Present Girls/Day', value: avgGirlsP, color:[190,24,93],   bg:[253,242,248] },
+                        { label:'Working Days',          value: workingDays, color:[109,40,217], bg:[245,243,255] },
+                    ],
                 ];
 
                 const cellH = 18, gapX = 3, gapY = 4;
@@ -2752,7 +2864,7 @@
                 });
 
                 // ── Combine row (full-width split) ───────────────────────
-                const combineY = startY + 8 + 2 * (cellH + gapY) + 2;
+                const combineY = startY + 8 + 3 * (cellH + gapY) + 2;
                 const halfW = (pageW - 28 - gapX) / 2;
                 [
                     { label:'Combine Present', value: boysPT+girlsPT, color:[22,163,74],  bg:[240,253,244], x:14 },
@@ -2766,6 +2878,33 @@
                     doc.text(cell.label, cell.x+7, combineY+5.5);
                     doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(...cell.color);
                     doc.text(String(cell.value), cell.x+7, combineY+14);
+                });
+
+                // ── Maximums row ─────────────────────────────────────────
+                const maxY = combineY + cellH + gapY + 2;
+
+                // "Maximums" sub-heading
+                doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.setTextColor(75,85,99);
+                doc.text('DAILY MAXIMUMS (peak on any single day)', 14, maxY - 1);
+
+                const quarterW = (pageW - 28 - 3 * gapX) / 4;
+                const maxCells = [
+                    { label:'Max Present Boys',  value: maxBoysP,  color:[29,78,216],  bg:[239,246,255] },
+                    { label:'Max Present Girls', value: maxGirlsP, color:[190,24,93],  bg:[253,242,248] },
+                    { label:'Max Absent Boys',   value: maxBoysA,  color:[220,38,38],  bg:[254,242,242] },
+                    { label:'Max Absent Girls',  value: maxGirlsA, color:[234,88,12],  bg:[255,247,237] },
+                ];
+                maxCells.forEach((cell, i) => {
+                    const x = 14 + i * (quarterW + gapX);
+                    const y = maxY + 3;
+                    doc.setFillColor(...cell.bg);
+                    doc.roundedRect(x, y, quarterW, cellH, 2, 2, 'F');
+                    doc.setFillColor(...cell.color);
+                    doc.roundedRect(x, y, 3, cellH, 1, 1, 'F');
+                    doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.setTextColor(75,85,99);
+                    doc.text(cell.label, x + 7, y + 5.5);
+                    doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(...cell.color);
+                    doc.text(String(cell.value), x + 7, y + 14);
                 });
 
                 doc.save((classTitle ? `Attendance_${classTitle.replace(/\s+/g,'_')}_${cm}` : `Attendance_${cm}`) + '.pdf');
