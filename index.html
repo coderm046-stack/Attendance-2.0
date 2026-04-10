@@ -3303,11 +3303,11 @@
                 const endYear = startYear + 1;
                 return { startYear, endYear, label: `Academic Year ${startYear}-${String(endYear).slice(2)}` };
             }
-            // Fallback: auto-detect from current date
+            // Fallback: auto-detect from current date (academic year starts April)
             const now = new Date();
             const y = now.getFullYear();
             const m = now.getMonth() + 1;
-            if (m >= 6) {
+            if (m >= 4) {
                 return { startYear: y, endYear: y + 1, label: `Academic Year ${y}-${String(y+1).slice(2)}` };
             } else {
                 return { startYear: y - 1, endYear: y, label: `Academic Year ${y-1}-${String(y).slice(2)}` };
@@ -3325,7 +3325,7 @@
             const now = new Date();
             const curY = now.getFullYear();
             const curM = now.getMonth() + 1;
-            const defaultStart = curM >= 6 ? curY : curY - 1;
+            const defaultStart = curM >= 4 ? curY : curY - 1;
             const saved = localStorage.getItem('selectedAcadYear');
             sel.innerHTML = '';
             for (let y = 2018; y <= 2035; y++) {
@@ -3368,10 +3368,12 @@
                 ? 'linear-gradient(135deg, #9c27b0, #e91e8c)'
                 : 'linear-gradient(135deg, #1976D2, #2196F3)';
 
-            // Month-wise attendance calculation (June to May academic year)
+            // Month-wise attendance calculation (April to March academic year)
             const monthNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-            // Academic months: Jun, Jul, Aug, Sep, Oct, Nov, Dec, Jan, Feb, Mar, Apr, May
+            // Academic months: Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec, Jan, Feb, Mar
             const acadMonths = [
+                { m: 4,  y: acadYear.startYear },
+                { m: 5,  y: acadYear.startYear },
                 { m: 6,  y: acadYear.startYear },
                 { m: 7,  y: acadYear.startYear },
                 { m: 8,  y: acadYear.startYear },
@@ -3382,17 +3384,12 @@
                 { m: 1,  y: acadYear.endYear },
                 { m: 2,  y: acadYear.endYear },
                 { m: 3,  y: acadYear.endYear },
-                { m: 4,  y: acadYear.endYear },
-                { m: 5,  y: acadYear.endYear },
             ];
 
-            // Rearranged for display (Jan-Dec order, 4 per row)
+            // Display order: Apr (startYear) → Mar (endYear) — 12 months, 4 per row
             const displayOrder = [
-                { m: 1,  y: acadYear.endYear },
-                { m: 2,  y: acadYear.endYear },
-                { m: 3,  y: acadYear.endYear },
-                { m: 4,  y: acadYear.endYear },
-                { m: 5,  y: acadYear.endYear },
+                { m: 4,  y: acadYear.startYear },
+                { m: 5,  y: acadYear.startYear },
                 { m: 6,  y: acadYear.startYear },
                 { m: 7,  y: acadYear.startYear },
                 { m: 8,  y: acadYear.startYear },
@@ -3400,11 +3397,14 @@
                 { m: 10, y: acadYear.startYear },
                 { m: 11, y: acadYear.startYear },
                 { m: 12, y: acadYear.startYear },
+                { m: 1,  y: acadYear.endYear },
+                { m: 2,  y: acadYear.endYear },
+                { m: 3,  y: acadYear.endYear },
             ];
 
-            // Fetch all attendance for this student across the academic year
-            const fromStr = `${acadYear.startYear}-06-01`;
-            const toStr   = `${acadYear.endYear}-05-31`;
+            // Fetch all attendance for this student across the academic year (Apr–Mar)
+            const fromStr = `${acadYear.startYear}-04-01`;
+            const toStr   = `${acadYear.endYear}-03-31`;
             const records = await db.attendance
                 .where('date').between(fromStr, toStr, true, true)
                 .filter(r => r.studentId === studentId)
