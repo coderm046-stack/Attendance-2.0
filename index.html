@@ -1356,39 +1356,46 @@
             border-bottom-color: #1976D2;
         }
         .profile-slides-outer {
-            overflow: hidden;    /* clips horizontal bleed */
+            overflow: hidden;          /* clips horizontal bleed for slide transition */
             position: relative;
-            flex: 1;             /* fill all remaining height inside the flex modal */
-            min-height: 0;       /* CRITICAL — allows flex child to shrink and enable scroll */
+            flex: 1;                   /* fill remaining height in the flex modal */
+            min-height: 0;             /* allow flex child to shrink */
+            display: flex;             /* make outer itself a flex column */
+            flex-direction: column;
         }
         .profile-slides-track {
-            display: flex;
-            height: 100%;        /* fill the outer completely */
+            display: flex;             /* horizontal track for slide transition */
+            flex: 1;                   /* fill the outer's column height — gives REAL pixel height */
+            min-height: 0;             /* required for flex children to scroll */
             transition: transform 0.32s cubic-bezier(0.4,0,0.2,1);
             will-change: transform;
         }
         .profile-slide {
             min-width: 100%;
             flex-shrink: 0;
-            overflow-y: auto;                   /* attendance slide scrolls as a whole */
-            -webkit-overflow-scrolling: touch;
-            height: 100%;
+            overflow-y: auto;                   /* each slide scrolls its own content */
+            -webkit-overflow-scrolling: touch;  /* smooth iOS momentum scroll */
             box-sizing: border-box;
+            /* height is controlled by align-items:stretch from the horizontal track flex */
         }
 
-        /* Remark slide overrides — internal flex column so ONLY table area scrolls */
+        /* Remark slide: sticky controls + natural scroll */
         #slide-remarks {
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .remark-sticky-controls {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: var(--bg-secondary);
+            padding: 12px 20px 10px;
             display: flex;
             flex-direction: column;
-            overflow-y: hidden; /* the slide itself does NOT scroll */
-            padding-bottom: 0;
+            gap: 8px;
         }
-        .remark-month-select-wrap {
-            flex-shrink: 0; /* dropdown always visible, never pushed out */
-        }
-        .remark-print-btn-wrap {
-            flex-shrink: 0;
-            padding: 0 20px 10px;
+        .remark-table-wrap {
+            padding: 0 16px 24px;
         }
         .remark-print-btn {
             width: 100%;
@@ -1410,14 +1417,6 @@
             transition: opacity 0.18s;
         }
         .remark-print-btn:active { opacity: 0.78; }
-        .remark-table-wrap {
-            flex: 1;        /* take all remaining height */
-            min-height: 0;  /* CRITICAL — allows flex child to shrink and scroll */
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-            overflow-x: hidden;
-            padding: 0 16px 16px;
-        }
         .remark-month-select {
             width: 100%;
             padding: 14px 16px;
@@ -4133,12 +4132,10 @@
 
                     <!-- Slide 1 : Remark Summary -->
                     <div class="profile-slide" id="slide-remarks">
-                        <div class="remark-month-select-wrap">
+                        <div class="remark-sticky-controls">
                             <select id="remark-month-select" class="remark-month-select" onchange="loadStudentRemarks()">
                                 <option value="">— Select Month —</option>
                             </select>
-                        </div>
-                        <div class="remark-print-btn-wrap">
                             <button class="remark-print-btn" onclick="printAllRemarks()">
                                 <i class="fas fa-print"></i> Print Full Remark Report (All Months)
                             </button>
