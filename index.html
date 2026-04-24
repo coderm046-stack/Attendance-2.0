@@ -1370,16 +1370,53 @@
         .profile-slide {
             min-width: 100%;
             flex-shrink: 0;
-            overflow-y: auto;                   /* each slide scrolls independently */
-            -webkit-overflow-scrolling: touch;  /* smooth momentum scroll on iOS */
-            height: 100%;                       /* fill the track height */
+            overflow-y: auto;                   /* attendance slide scrolls as a whole */
+            -webkit-overflow-scrolling: touch;
+            height: 100%;
             box-sizing: border-box;
-            padding-bottom: 24px;
         }
 
-        /* Remark slide styles */
+        /* Remark slide overrides — internal flex column so ONLY table area scrolls */
+        #slide-remarks {
+            display: flex;
+            flex-direction: column;
+            overflow-y: hidden; /* the slide itself does NOT scroll */
+            padding-bottom: 0;
+        }
         .remark-month-select-wrap {
-            padding: 12px 20px 8px;
+            flex-shrink: 0; /* dropdown always visible, never pushed out */
+        }
+        .remark-print-btn-wrap {
+            flex-shrink: 0;
+            padding: 0 20px 10px;
+        }
+        .remark-print-btn {
+            width: 100%;
+            padding: 11px 16px;
+            border: none;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 13px;
+            font-family: 'Poppins', sans-serif;
+            cursor: pointer;
+            background: linear-gradient(135deg, #1565C0, #1976D2);
+            color: white;
+            letter-spacing: 0.4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            box-shadow: 0 3px 10px rgba(21,101,192,0.4);
+            transition: opacity 0.18s;
+        }
+        .remark-print-btn:active { opacity: 0.78; }
+        .remark-table-wrap {
+            flex: 1;        /* take all remaining height */
+            min-height: 0;  /* CRITICAL — allows flex child to shrink and scroll */
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            overflow-x: hidden;
+            padding: 0 16px 16px;
         }
         .remark-month-select {
             width: 100%;
@@ -1401,17 +1438,13 @@
         [data-theme="light"] .remark-month-select {
             background: #3d4a6b;
         }
-        .remark-table-wrap {
-            padding: 0 16px 8px;
-            overflow-x: auto;
-        }
         .remark-summary-table {
             width: 100%;
             border-collapse: collapse;
             font-family: "Poppins", sans-serif;
             font-size: 13px;
             border-radius: 12px;
-            overflow: hidden;
+            overflow: visible;
             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
         }
         .remark-summary-table thead tr {
@@ -3518,21 +3551,6 @@
 
             // Month-wise attendance calculation (April to March academic year)
             const monthNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-            // Academic months: Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec, Jan, Feb, Mar
-            const acadMonths = [
-                { m: 4,  y: acadYear.startYear },
-                { m: 5,  y: acadYear.startYear },
-                { m: 6,  y: acadYear.startYear },
-                { m: 7,  y: acadYear.startYear },
-                { m: 8,  y: acadYear.startYear },
-                { m: 9,  y: acadYear.startYear },
-                { m: 10, y: acadYear.startYear },
-                { m: 11, y: acadYear.startYear },
-                { m: 12, y: acadYear.startYear },
-                { m: 1,  y: acadYear.endYear },
-                { m: 2,  y: acadYear.endYear },
-                { m: 3,  y: acadYear.endYear },
-            ];
 
             // Display order: Apr (startYear) → Mar (endYear) — 12 months, 4 per row
             const displayOrder = [
@@ -3643,6 +3661,8 @@
 
             // Store student ID for remarks, populate month dropdown, reset to slide 0
             _profileStudentId = studentId;
+            _profileStudentData = student;
+            _profileAcadYear   = acadYear;
             populateRemarkMonthDropdown(acadYear);
             goToSlide(0);
             // Pre-load remarks if a month is already selected
@@ -3678,18 +3698,23 @@
             }
         }
 
-        /* Touch-swipe support for profile slides */
+        /* Touch-swipe support for profile slides — only fires when horizontal > vertical */
         (function attachProfileSwipe() {
-            let _sx = 0;
+            let _sx = 0, _sy = 0;
             document.addEventListener('touchstart', e => {
                 const modal = document.getElementById('profile-modal');
-                if (modal && modal.contains(e.target)) _sx = e.touches[0].clientX;
+                if (modal && modal.contains(e.target)) {
+                    _sx = e.touches[0].clientX;
+                    _sy = e.touches[0].clientY;
+                }
             }, { passive: true });
             document.addEventListener('touchend', e => {
                 const modal = document.getElementById('profile-modal');
                 if (!modal || !modal.contains(e.target)) return;
                 const dx = e.changedTouches[0].clientX - _sx;
-                if (Math.abs(dx) > 45) {
+                const dy = e.changedTouches[0].clientY - _sy;
+                // Only trigger slide change when horizontal movement is dominant AND large enough
+                if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
                     if (dx < 0 && _profileSlideIdx === 0) goToSlide(1);
                     else if (dx > 0 && _profileSlideIdx === 1) goToSlide(0);
                 }
@@ -3727,7 +3752,304 @@
         }
 
         /* ─── Load & display remarks for current student/month ────── */
-        let _profileStudentId = null;
+        let _profileStudentId   = null;
+        let _profileStudentData = null;
+        let _profileAcadYear    = null;
+
+        /* ─── Print all remarks (A4 report) ────────────────────────── */
+        async function printAllRemarks() {
+            if (!_profileStudentId || !_profileStudentData || !_profileAcadYear) return;
+
+            const ay  = _profileAcadYear;
+            const stu = _profileStudentData;
+
+            // Fetch ALL remark records for this student across the academic year
+            const from = `${ay.startYear}-04-01`;
+            const to   = `${ay.endYear}-03-31`;
+            const allRecords = await db.attendance
+                .where('date').between(from, to, true, true)
+                .filter(r => r.studentId === _profileStudentId && r.remark && r.remark.trim() !== '')
+                .toArray();
+
+            allRecords.sort((a, b) => a.date.localeCompare(b.date));
+
+            // Group by YYYY-MM
+            const monthMap = {};
+            const MONTH_NAMES = ['January','February','March','April','May','June',
+                                 'July','August','September','October','November','December'];
+            allRecords.forEach(r => {
+                const ym = r.date.substring(0, 7); // "YYYY-MM"
+                if (!monthMap[ym]) monthMap[ym] = [];
+                monthMap[ym].push(r);
+            });
+
+            // Build rows HTML per month
+            let monthSections = '';
+            let totalRemarks  = 0;
+            const sortedYMs   = Object.keys(monthMap).sort();
+
+            if (sortedYMs.length === 0) {
+                monthSections = `<tr><td colspan="3" style="text-align:center;padding:22px;color:#888;font-style:italic;">No remarks recorded for this academic year.</td></tr>`;
+            } else {
+                sortedYMs.forEach(ym => {
+                    const [yr, mo] = ym.split('-');
+                    const mName = `${MONTH_NAMES[parseInt(mo,10)-1]} ${yr}`;
+                    // Month header row
+                    monthSections += `<tr class="month-header-row">
+                        <td colspan="3">${mName}</td>
+                    </tr>`;
+                    monthMap[ym].forEach((r, i) => {
+                        const d   = new Date(r.date + 'T00:00:00');
+                        const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+                        const dd  = String(d.getDate()).padStart(2,'0');
+                        const mm  = String(d.getMonth()+1).padStart(2,'0');
+                        monthSections += `<tr class="${(totalRemarks % 2 === 0) ? 'even' : 'odd'}">
+                            <td class="sr-col">${++totalRemarks}</td>
+                            <td class="date-col">${dd}/${mm}/${d.getFullYear()}<br><span class="dow">${dow}</span></td>
+                            <td class="remark-col">${r.remark.toUpperCase()}</td>
+                        </tr>`;
+                    });
+                });
+            }
+
+            // Avatar: get the student's photo src
+            const avatarEl = document.getElementById('profile-avatar-img');
+            const avatarSrc = (avatarEl && avatarEl.src) ? avatarEl.src : '';
+
+            // School name from settings (if stored)
+            let schoolName = 'SCHOOL NAME';
+            try {
+                const sn = await db.settings.get('schoolName');
+                if (sn && sn.value) schoolName = sn.value.toUpperCase();
+            } catch(e) {}
+
+            const classLabel = stu.className || (stu.class || '');
+            const divLabel   = stu.division  || '';
+
+            const printHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Remark Report — ${stu.name}</title>
+<style>
+  @page { size: A4 portrait; margin: 18mm 16mm 18mm 16mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11pt; color: #111; background: #fff; }
+
+  /* ── Page header ── */
+  .report-header {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    border-bottom: 3px solid #1565C0;
+    padding-bottom: 12px;
+    margin-bottom: 14px;
+  }
+  .header-avatar {
+    width: 80px; height: 80px;
+    border-radius: 10px;
+    object-fit: cover;
+    border: 2px solid #1565C0;
+    flex-shrink: 0;
+  }
+  .header-avatar-placeholder {
+    width: 80px; height: 80px;
+    border-radius: 10px;
+    background: #e3eaf5;
+    border: 2px solid #1565C0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 36px; color: #1565C0;
+    flex-shrink: 0;
+  }
+  .header-info { flex: 1; }
+  .school-name {
+    font-size: 15pt;
+    font-weight: 800;
+    color: #1565C0;
+    letter-spacing: 0.5px;
+    margin-bottom: 3px;
+  }
+  .report-title {
+    font-size: 10pt;
+    font-weight: 700;
+    color: #444;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .student-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 20px;
+    font-size: 9.5pt;
+  }
+  .meta-item { display: flex; gap: 4px; }
+  .meta-label { color: #666; }
+  .meta-value { font-weight: 700; color: #111; }
+
+  /* ── Summary strip ── */
+  .summary-strip {
+    display: flex;
+    gap: 0;
+    margin-bottom: 14px;
+    border: 1.5px solid #1565C0;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .summary-cell {
+    flex: 1;
+    padding: 8px 12px;
+    text-align: center;
+    border-right: 1px solid #c5d8f0;
+  }
+  .summary-cell:last-child { border-right: none; }
+  .summary-cell .s-label { font-size: 7.5pt; color: #666; text-transform: uppercase; letter-spacing: 0.8px; }
+  .summary-cell .s-value { font-size: 13pt; font-weight: 800; color: #1565C0; margin-top: 2px; }
+
+  /* ── Table ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10pt;
+  }
+  thead tr {
+    background: #1565C0;
+    color: white;
+  }
+  thead th {
+    padding: 9px 10px;
+    text-align: left;
+    font-size: 9pt;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+  }
+  thead th.sr-col  { width: 6%; text-align: center; }
+  thead th.date-col{ width: 22%; }
+  thead th.remark-col{ width: 72%; }
+
+  tr.month-header-row td {
+    background: #dce8f8;
+    color: #1565C0;
+    font-weight: 800;
+    font-size: 9.5pt;
+    padding: 7px 10px;
+    letter-spacing: 0.5px;
+    border-top: 2px solid #1565C0;
+    border-bottom: 1px solid #a8c4e8;
+  }
+  tr.even td { background: #fff; }
+  tr.odd  td { background: #f4f8ff; }
+  td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #dde7f5;
+    vertical-align: top;
+    line-height: 1.45;
+  }
+  td.sr-col { text-align: center; color: #666; font-size: 9pt; }
+  td.date-col { font-weight: 600; white-space: nowrap; font-size: 9.5pt; }
+  .dow { font-size: 8pt; color: #888; font-weight: 400; }
+
+  /* ── Footer ── */
+  .report-footer {
+    margin-top: 18px;
+    border-top: 1.5px solid #1565C0;
+    padding-top: 10px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 8.5pt;
+    color: #666;
+  }
+  .sign-line {
+    margin-top: 28px;
+    display: flex;
+    justify-content: flex-end;
+  }
+  .sign-block {
+    text-align: center;
+    font-size: 9pt;
+    color: #333;
+  }
+  .sign-block .line {
+    border-top: 1.5px solid #333;
+    width: 160px;
+    margin-bottom: 4px;
+  }
+
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    tr.month-header-row { break-before: auto; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="report-header">
+  ${avatarSrc
+    ? `<img class="header-avatar" src="${avatarSrc}" alt="Student Photo">`
+    : `<div class="header-avatar-placeholder">&#128100;</div>`}
+  <div class="header-info">
+    <div class="school-name">${schoolName}</div>
+    <div class="report-title">Student Remark Report — Academic Year ${ay.startYear}–${ay.endYear}</div>
+    <div class="student-meta">
+      <div class="meta-item"><span class="meta-label">Name:</span><span class="meta-value">${(stu.name||'').toUpperCase()}</span></div>
+      <div class="meta-item"><span class="meta-label">Roll No:</span><span class="meta-value">${stu.rollNumber || stu.roll || '—'}</span></div>
+      ${classLabel ? `<div class="meta-item"><span class="meta-label">Class:</span><span class="meta-value">${classLabel}${divLabel ? ' – ' + divLabel : ''}</span></div>` : ''}
+      <div class="meta-item"><span class="meta-label">Gender:</span><span class="meta-value">${(stu.gender||'').toUpperCase() || '—'}</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Summary strip -->
+<div class="summary-strip">
+  <div class="summary-cell">
+    <div class="s-label">Total Remarks</div>
+    <div class="s-value">${totalRemarks}</div>
+  </div>
+  <div class="summary-cell">
+    <div class="s-label">Months with Remarks</div>
+    <div class="s-value">${sortedYMs.length}</div>
+  </div>
+  <div class="summary-cell">
+    <div class="s-label">Report Generated</div>
+    <div class="s-value" style="font-size:9.5pt;margin-top:4px;">${new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</div>
+  </div>
+</div>
+
+<!-- Remarks table -->
+<table>
+  <thead>
+    <tr>
+      <th class="sr-col">Sr.</th>
+      <th class="date-col">Date</th>
+      <th class="remark-col">Remark</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${monthSections}
+  </tbody>
+</table>
+
+<!-- Footer -->
+<div class="report-footer">
+  <span>Printed on: ${new Date().toLocaleString('en-IN')}</span>
+  <span>Confidential — For School Use Only</span>
+</div>
+<div class="sign-line">
+  <div class="sign-block">
+    <div class="line"></div>
+    Class Teacher's Signature
+  </div>
+</div>
+
+<script>window.onload = function(){ window.print(); };<\/script>
+</body></html>`;
+
+            const w = window.open('', '_blank', 'width=800,height=900');
+            if (!w) { alert('Please allow popups to print the report.'); return; }
+            w.document.write(printHTML);
+            w.document.close();
+        }
 
         async function loadStudentRemarks() {
             const sel = document.getElementById('remark-month-select');
@@ -3754,7 +4076,6 @@
                 return;
             }
 
-            const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
             tbody.innerHTML = records.map(r => {
                 const d = new Date(r.date + 'T00:00:00');
                 const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
@@ -3816,6 +4137,11 @@
                             <select id="remark-month-select" class="remark-month-select" onchange="loadStudentRemarks()">
                                 <option value="">— Select Month —</option>
                             </select>
+                        </div>
+                        <div class="remark-print-btn-wrap">
+                            <button class="remark-print-btn" onclick="printAllRemarks()">
+                                <i class="fas fa-print"></i> Print Full Remark Report (All Months)
+                            </button>
                         </div>
                         <div class="remark-table-wrap">
                             <table class="remark-summary-table" id="remark-summary-table">
