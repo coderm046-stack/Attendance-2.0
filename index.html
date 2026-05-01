@@ -582,6 +582,10 @@
             border-top-color: var(--border-female);
         }
         
+        .percentage-card.combined {
+            border-top-color: var(--accent-green);
+        }
+        
         .percentage-value {
             font-size: 48px;
             font-weight: 800;
@@ -1684,15 +1688,11 @@
                     </div>
                     <div style="flex:1; min-width:130px;">
                         <label style="font-size:11px; color:var(--text-secondary); font-weight:600; display:block; margin-bottom:5px;">From Date:</label>
-                        <select id="vacation-from-select" style="width:100%; padding:9px 12px; border-radius:10px; border:2px solid rgba(167,139,250,0.4); background:var(--bg-tertiary); color:var(--text-primary); font-size:13px; font-weight:600; cursor:pointer;">
-                            <option value="">-- start day --</option>
-                        </select>
+                        <input type="date" id="vacation-from-select" style="width:100%; padding:9px 12px; border-radius:10px; border:2px solid rgba(167,139,250,0.4); background:var(--bg-tertiary); color:var(--text-primary); font-size:13px; font-weight:600; cursor:pointer; font-family:inherit;">
                     </div>
                     <div style="flex:1; min-width:130px;">
                         <label style="font-size:11px; color:var(--text-secondary); font-weight:600; display:block; margin-bottom:5px;">To Date:</label>
-                        <select id="vacation-to-select" style="width:100%; padding:9px 12px; border-radius:10px; border:2px solid rgba(167,139,250,0.4); background:var(--bg-tertiary); color:var(--text-primary); font-size:13px; font-weight:600; cursor:pointer;">
-                            <option value="">-- end day --</option>
-                        </select>
+                        <input type="date" id="vacation-to-select" style="width:100%; padding:9px 12px; border-radius:10px; border:2px solid rgba(167,139,250,0.4); background:var(--bg-tertiary); color:var(--text-primary); font-size:13px; font-weight:600; cursor:pointer; font-family:inherit;">
                     </div>
                     <div style="flex:2; min-width:160px;">
                         <label style="font-size:11px; color:var(--text-secondary); font-weight:600; display:block; margin-bottom:5px;">Vacation Name:</label>
@@ -1772,20 +1772,21 @@
                 </div>
             </div>
 
-            <div class="summary-grid">
+            <div class="summary-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
                 <div class="percentage-card male">
                     <div class="summary-title">Present % of Boys</div>
                     <div class="percentage-value" id="boys-percentage">0%</div>
-                    <p style="color: var(--text-secondary); font-size: 12px; margin-top: 8px;">
-                        (Subtract Holidays)
-                    </p>
+                    <p style="color: var(--text-secondary); font-size: 12px; margin-top: 8px;">(Subtract Holidays)</p>
                 </div>
                 <div class="percentage-card female">
                     <div class="summary-title">Present % of Girls</div>
                     <div class="percentage-value" id="girls-percentage">0%</div>
-                    <p style="color: var(--text-secondary); font-size: 12px; margin-top: 8px;">
-                        (Subtract Holidays)
-                    </p>
+                    <p style="color: var(--text-secondary); font-size: 12px; margin-top: 8px;">(Subtract Holidays)</p>
+                </div>
+                <div class="percentage-card combined">
+                    <div class="summary-title">Combined Present %</div>
+                    <div class="percentage-value" id="combined-percentage">0%</div>
+                    <p style="color: var(--text-secondary); font-size: 12px; margin-top: 8px;">(Boys + Girls, Subtract Holidays)</p>
                 </div>
             </div>
 
@@ -2678,16 +2679,15 @@
                     opt.textContent = `${d} ${months[month-1]} (${dow})`; select.appendChild(opt);
                 }
             }
+            // Set default values for vacation date inputs to current selected month bounds
             const vFrom = document.getElementById('vacation-from-select');
             const vTo   = document.getElementById('vacation-to-select');
-            if (vFrom && vTo) {
-                const base = Array.from({length: days}, (_,i) => {
-                    const d = i+1, dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-                    const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(year, month-1, d).getDay()];
-                    return `<option value="${dateStr}">${d} ${months[month-1]} (${dow})</option>`;
-                }).join('');
-                vFrom.innerHTML = '<option value="">-- start day --</option>' + base;
-                vTo.innerHTML   = '<option value="">-- end day --</option>'   + base;
+            if (vFrom && !vFrom.value) {
+                vFrom.value = `${year}-${String(month).padStart(2,'0')}-01`;
+            }
+            if (vTo && !vTo.value) {
+                const lastDay = new Date(year, month, 0).getDate();
+                vTo.value = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
             }
         }
         async function addHoliday() {
@@ -2708,11 +2708,12 @@
             if (!fromDate) { alert('Select start date.'); return; }
             if (!toDate)   { alert('Select end date.'); return; }
             if (!nameVal)  { alert('Enter vacation name.'); return; }
-            if (fromDate > toDate) { alert('Start must be before end.'); return; }
+            if (fromDate > toDate) { alert('Start date must be before or equal to end date.'); return; }
             const groupId = 'vac_' + Date.now();
             let added = 0;
-            for (let d = new Date(fromDate+'T00:00:00'); d <= new Date(toDate+'T00:00:00'); d.setDate(d.getDate()+1)) {
-                const ds = d.toISOString().split('T')[0];
+            for (let d = new Date(fromDate + 'T00:00:00'); d <= new Date(toDate + 'T00:00:00'); d.setDate(d.getDate() + 1)) {
+                // Use local date parts to avoid timezone-related date shift (e.g. IST +5:30)
+                const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
                 if (!(await db.holidays.where('date').equals(ds).first())) { await db.holidays.add({ date: ds, name: nameVal, groupId }); added++; }
             }
             document.getElementById('vacation-name-input').value = '';
@@ -2909,8 +2910,10 @@
                 if (dayGirlsA > maxGirlsA) maxGirlsA = dayGirlsA;
             }
 
-            const boysPerc  = boysTotal  > 0 && workingDays > 0 ? ((boysPT  / (boysTotal  * workingDays)) * 100).toFixed(2) : 0;
-            const girlsPerc = girlsTotal > 0 && workingDays > 0 ? ((girlsPT / (girlsTotal * workingDays)) * 100).toFixed(2) : 0;
+            const boysPerc    = boysTotal  > 0 && workingDays > 0 ? ((boysPT  / (boysTotal  * workingDays)) * 100).toFixed(2) : 0;
+            const girlsPerc   = girlsTotal > 0 && workingDays > 0 ? ((girlsPT / (girlsTotal * workingDays)) * 100).toFixed(2) : 0;
+            const totalStudents = boysTotal + girlsTotal;
+            const combinedPerc  = totalStudents > 0 && workingDays > 0 ? (((boysPT + girlsPT) / (totalStudents * workingDays)) * 100).toFixed(2) : 0;
             const avgBoysP  = workingDays > 0 ? (boysPT  / workingDays).toFixed(2) : '0.00';
             const avgGirlsP = workingDays > 0 ? (girlsPT / workingDays).toFixed(2) : '0.00';
 
@@ -2920,8 +2923,9 @@
             document.getElementById('total-absent-girls').textContent    = girlsAT;
             document.getElementById('combine-present-monthly').textContent = boysPT + girlsPT;
             document.getElementById('combine-absent-monthly').textContent  = boysAT + girlsAT;
-            document.getElementById('boys-percentage').textContent  = boysPerc  + '%';
-            document.getElementById('girls-percentage').textContent = girlsPerc + '%';
+            document.getElementById('boys-percentage').textContent     = boysPerc     + '%';
+            document.getElementById('girls-percentage').textContent    = girlsPerc    + '%';
+            document.getElementById('combined-percentage').textContent = combinedPerc + '%';
             document.getElementById('avg-present-boys').textContent  = avgBoysP;
             document.getElementById('avg-present-girls').textContent = avgGirlsP;
             document.getElementById('max-present-boys').textContent  = maxBoysP;
