@@ -1984,6 +1984,72 @@
 
             <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:24px;" id="summary-stat-cards">
             </div>
+
+            <!-- ── Low Attendance Report ───────────────────────────── -->
+            <div style="background:var(--bg-secondary); border-radius:16px; padding:20px; box-shadow:0 4px 16px rgba(0,0,0,0.12); margin-bottom:24px;">
+
+                <!-- Header -->
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+                    <div style="background:linear-gradient(135deg,#ef4444,#b91c1c); border-radius:10px; width:40px; height:40px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                        <i class="fas fa-user-times" style="color:white; font-size:16px;"></i>
+                    </div>
+                    <div>
+                        <div style="font-size:16px; font-weight:700; color:var(--text-primary);">Low Attendance Students</div>
+                        <div style="font-size:12px; color:var(--text-secondary);">Students below the selected threshold — across the chosen date range</div>
+                    </div>
+                </div>
+
+                <!-- Controls row -->
+                <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-bottom:16px;">
+                    <div style="flex:0 0 auto;">
+                        <label style="display:block; font-size:11px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">Threshold %</label>
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <input type="number" id="low-att-threshold" value="50" min="1" max="100"
+                                style="width:80px; padding:10px 12px; border:2px solid var(--bg-tertiary); border-radius:8px; background:var(--bg-primary); color:var(--text-primary); font-size:15px; font-weight:700; text-align:center;">
+                            <span style="font-size:18px; font-weight:700; color:var(--text-secondary);">%</span>
+                        </div>
+                    </div>
+                    <button onclick="generateLowAttendanceList()"
+                        style="padding:10px 20px; background:linear-gradient(135deg,#ef4444,#b91c1c); color:white; border:none; border-radius:8px; font-size:13px; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:8px;">
+                        <i class="fas fa-search"></i> Generate List
+                    </button>
+                    <button id="low-att-dl-excel" onclick="downloadLowAttExcel()" style="display:none; padding:10px 20px; background:linear-gradient(135deg,#16a34a,#15803d); color:white; border:none; border-radius:8px; font-size:13px; font-weight:700; cursor:pointer; gap:8px; align-items:center;">
+                        <i class="fas fa-file-excel"></i> Download Excel
+                    </button>
+                    <button id="low-att-dl-pdf" onclick="downloadLowAttPDF()" style="display:none; padding:10px 20px; background:linear-gradient(135deg,#3b82f6,#1d4ed8); color:white; border:none; border-radius:8px; font-size:13px; font-weight:700; cursor:pointer; gap:8px; align-items:center;">
+                        <i class="fas fa-file-pdf"></i> Download PDF
+                    </button>
+                </div>
+
+                <!-- Result area -->
+                <div id="low-att-result" style="display:none;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+                        <div id="low-att-summary-text" style="font-size:13px; color:var(--text-secondary);"></div>
+                    </div>
+                    <div style="overflow-x:auto; border-radius:10px; border:1px solid var(--bg-tertiary);">
+                        <table id="low-att-table" style="width:100%; border-collapse:collapse; font-size:13px;">
+                            <thead>
+                                <tr style="background:linear-gradient(135deg,#ef4444,#b91c1c);">
+                                    <th style="padding:10px 14px; color:white; font-weight:700; text-align:left; border-radius:0;">#</th>
+                                    <th style="padding:10px 14px; color:white; font-weight:700; text-align:center;">Roll No</th>
+                                    <th style="padding:10px 14px; color:white; font-weight:700; text-align:left;">Student Name</th>
+                                    <th style="padding:10px 14px; color:white; font-weight:700; text-align:center;">Present Days</th>
+                                    <th style="padding:10px 14px; color:white; font-weight:700; text-align:center;">Working Days</th>
+                                    <th style="padding:10px 14px; color:white; font-weight:700; text-align:center;">Attendance %</th>
+                                </tr>
+                            </thead>
+                            <tbody id="low-att-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div id="low-att-empty" style="display:none; padding:32px; text-align:center; color:#10b981; font-weight:600; font-size:15px;">
+                        <i class="fas fa-check-circle" style="font-size:32px; margin-bottom:8px; display:block;"></i>
+                        All students are above the threshold — great attendance!
+                    </div>
+                </div>
+            </div>
+
+                </div>
+            </div>
         </div>
     </div>
 
@@ -3421,6 +3487,192 @@
         // ═══════════════════════════════════════════════════════════════
         // YEARLY WORKING DAYS SUMMARY
         // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════
+        // LOW ATTENDANCE LIST
+        // ═══════════════════════════════════════════════════════════════
+        let _lowAttData = []; // cache for download buttons
+
+        async function generateLowAttendanceList() {
+            const threshold = parseFloat(document.getElementById('low-att-threshold').value) || 50;
+            const fromYear  = parseInt(document.getElementById('summary-from-year').value);
+            const fromMonth = parseInt(document.getElementById('summary-from-month').value);
+            const toYear    = parseInt(document.getElementById('summary-to-year').value);
+            const toMonth   = parseInt(document.getElementById('summary-to-month').value);
+            if (!fromYear || !toYear) { alert('Please set a date range first.'); return; }
+
+            // Build list of months in range
+            const months = [];
+            let cy = fromYear, cm = fromMonth;
+            while (cy < toYear || (cy === toYear && cm <= toMonth)) {
+                months.push({ year: cy, month: cm });
+                cm++; if (cm > 12) { cm = 1; cy++; }
+            }
+
+            const students = getSortedStudents(await db.students.toArray());
+
+            // Per-student present count & total working days across range
+            const presentMap   = {};  // studentId → total present days
+            const workingTotal = {};  // studentId → total working days (same for all, but kept per-student for clarity)
+            students.forEach(s => { presentMap[s.id] = 0; workingTotal[s.id] = 0; });
+
+            let totalWorkingDays = 0;
+            for (const { year: y, month: m } of months) {
+                const wd  = await getWorkingDaysForMonth(y, m);
+                totalWorkingDays += wd;
+                const map = await fetchMonthAttendanceMap(y, m);
+                students.forEach(s => {
+                    workingTotal[s.id] += wd;
+                    map.forEach((rec, key) => {
+                        if (key.endsWith(`_${s.id}`) && rec.status === 'present') presentMap[s.id]++;
+                    });
+                });
+            }
+
+            // Filter & sort by attendance % ascending
+            const lowList = students
+                .map(s => {
+                    const wd   = workingTotal[s.id] || totalWorkingDays;
+                    const pres = presentMap[s.id];
+                    const perc = wd > 0 ? (pres / wd * 100) : 0;
+                    return { rollNo: s.rollNo, name: s.name, present: pres, workingDays: wd, perc };
+                })
+                .filter(s => s.perc < threshold)
+                .sort((a, b) => a.perc - b.perc);
+
+            _lowAttData = { list: lowList, threshold, months, totalWorkingDays };
+
+            // Render table
+            const tbody = document.getElementById('low-att-tbody');
+            const empty = document.getElementById('low-att-empty');
+            const result = document.getElementById('low-att-result');
+            const summText = document.getElementById('low-att-summary-text');
+
+            result.style.display = 'block';
+            document.getElementById('low-att-table').style.display = lowList.length ? 'table' : 'none';
+            empty.style.display  = lowList.length ? 'none' : 'block';
+
+            const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const rangeLabel = `${monthNames[fromMonth-1]} ${fromYear} – ${monthNames[toMonth-1]} ${toYear}`;
+            summText.innerHTML = `<strong style="color:#ef4444;">${lowList.length}</strong> student${lowList.length !== 1 ? 's' : ''} below <strong>${threshold}%</strong> &nbsp;|&nbsp; Range: ${rangeLabel} &nbsp;|&nbsp; Total working days: <strong>${totalWorkingDays}</strong>`;
+
+            const dlExcel = document.getElementById('low-att-dl-excel');
+            const dlPDF   = document.getElementById('low-att-dl-pdf');
+            if (lowList.length) {
+                dlExcel.style.display = 'inline-flex'; dlPDF.style.display = 'inline-flex';
+            } else {
+                dlExcel.style.display = 'none';  dlPDF.style.display = 'none';
+            }
+
+            tbody.innerHTML = lowList.map((s, i) => {
+                const pct = s.perc.toFixed(2);
+                const bad = s.perc < threshold * 0.6;  // deeply below threshold → darker red
+                const bg  = i % 2 === 0 ? 'var(--bg-secondary)' : 'var(--bg-primary)';
+                return `<tr style="background:${bg};">
+                    <td style="padding:10px 14px; color:var(--text-secondary); font-size:12px;">${i+1}</td>
+                    <td style="padding:10px 14px; text-align:center; font-weight:700; color:var(--text-primary);">${s.rollNo}</td>
+                    <td style="padding:10px 14px; font-weight:600; color:var(--text-primary);">${s.name}</td>
+                    <td style="padding:10px 14px; text-align:center; color:#16a34a; font-weight:600;">${s.present}</td>
+                    <td style="padding:10px 14px; text-align:center; color:var(--text-secondary);">${s.workingDays}</td>
+                    <td style="padding:10px 14px; text-align:center;">
+                        <span style="background:${bad?'#b91c1c':'#ef4444'}; color:white; padding:4px 10px; border-radius:20px; font-weight:700; font-size:13px;">${pct}%</span>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        function downloadLowAttExcel() {
+            const { list, threshold, months } = _lowAttData;
+            if (!list || !list.length) return;
+            const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+            const fromM = months[0], toM = months[months.length-1];
+            const rangeLabel = `${monthNames[fromM.month-1]} ${fromM.year} to ${monthNames[toM.month-1]} ${toM.year}`;
+
+            const aoa = [
+                [`Low Attendance Report — Below ${threshold}%`],
+                [`Range: ${rangeLabel}`],
+                [],
+                ['#', 'Roll No', 'Student Name', 'Present Days', 'Working Days', 'Attendance %'],
+                ...list.map((s, i) => [i+1, s.rollNo, s.name, s.present, s.workingDays, s.perc.toFixed(2) + '%'])
+            ];
+            const ws = XLSX.utils.aoa_to_sheet(aoa);
+            ws['!cols'] = [{wch:5},{wch:10},{wch:30},{wch:14},{wch:14},{wch:14}];
+            // Style header row
+            ['A4','B4','C4','D4','E4','F4'].forEach(addr => {
+                if (ws[addr]) ws[addr].s = { font:{bold:true, color:{rgb:'FFFFFF'}}, fill:{fgColor:{rgb:'DC2626'}}, alignment:{horizontal:'center'} };
+            });
+            // Style attendance % column
+            for (let r = 4; r < 4 + list.length; r++) {
+                const addr = XLSX.utils.encode_cell({r, c:5});
+                if (ws[addr]) ws[addr].s = { font:{bold:true, color:{rgb:'B91C1C'}}, alignment:{horizontal:'center'} };
+            }
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Low Attendance');
+            XLSX.writeFile(wb, `Low_Attendance_Below${threshold}pct_${fromM.year}${String(fromM.month).padStart(2,'0')}-${toM.year}${String(toM.month).padStart(2,'0')}.xlsx`);
+        }
+
+        async function downloadLowAttPDF() {
+            const { list, threshold, months, totalWorkingDays } = _lowAttData;
+            if (!list || !list.length) return;
+
+            let JsPDF = null;
+            if (window.jspdf && typeof window.jspdf.jsPDF === 'function') JsPDF = window.jspdf.jsPDF;
+            else if (typeof window.jsPDF === 'function') JsPDF = window.jsPDF;
+            else if (window.jsPDF && typeof window.jsPDF.jsPDF === 'function') JsPDF = window.jsPDF.jsPDF;
+            if (!JsPDF) { alert('PDF library not loaded. Please refresh.'); return; }
+            const doc = new JsPDF('p', 'mm', 'a4');
+            if (typeof doc.autoTable !== 'function') { alert('PDF table plugin not loaded. Please refresh.'); return; }
+
+            const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+            const fromM = months[0], toM = months[months.length-1];
+            const rangeLabel = `${monthNames[fromM.month-1]} ${fromM.year} – ${monthNames[toM.month-1]} ${toM.year}`;
+            const classTitle = getClassTitle();
+
+            const pageW = doc.internal.pageSize.getWidth();
+
+            // Title bar
+            doc.setFillColor(220, 38, 38);
+            doc.rect(0, 0, pageW, 22, 'F');
+            doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
+            doc.text(`Low Attendance Report — Below ${threshold}%`, 14, 10);
+            doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+            doc.text((classTitle ? `Class: ${classTitle}  |  ` : '') + `Range: ${rangeLabel}  |  Working Days: ${totalWorkingDays}`, 14, 18);
+
+            doc.autoTable({
+                head: [['#', 'Roll No', 'Student Name', 'Present Days', 'Working Days', 'Attendance %']],
+                body: list.map((s, i) => [i+1, s.rollNo, s.name, s.present, s.workingDays, s.perc.toFixed(2) + '%']),
+                startY: 28,
+                theme: 'grid',
+                styles:      { fontSize: 10, cellPadding: 3, halign: 'center', valign: 'middle' },
+                headStyles:  { fillColor: [220, 38, 38], fontStyle: 'bold', textColor: 255, halign: 'center' },
+                columnStyles: {
+                    0: { cellWidth: 12 },
+                    1: { cellWidth: 20 },
+                    2: { cellWidth: 70, halign: 'left' },
+                    3: { cellWidth: 28 },
+                    4: { cellWidth: 28 },
+                    5: { cellWidth: 28 }
+                },
+                didParseCell(data) {
+                    if (data.row.section !== 'body') return;
+                    if (data.column.index === 5) {
+                        data.cell.styles.textColor  = [185, 28, 28];
+                        data.cell.styles.fontStyle  = 'bold';
+                        data.cell.styles.fillColor  = [254, 226, 226];
+                    }
+                    if (data.row.index % 2 === 0) {
+                        if (data.column.index !== 5) data.cell.styles.fillColor = [249, 250, 251];
+                    }
+                }
+            });
+
+            // Footer count
+            const finalY = doc.lastAutoTable.finalY + 8;
+            doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(220, 38, 38);
+            doc.text(`Total: ${list.length} student${list.length !== 1 ? 's' : ''} below ${threshold}%`, 14, finalY);
+
+            doc.save(`Low_Attendance_Below${threshold}pct_${fromM.year}${String(fromM.month).padStart(2,'0')}-${toM.year}${String(toM.month).padStart(2,'0')}.pdf`);
+        }
+
         async function loadYearlySummary() {
             const fromYear  = parseInt(document.getElementById('summary-from-year').value);
             const fromMonth = parseInt(document.getElementById('summary-from-month').value);
